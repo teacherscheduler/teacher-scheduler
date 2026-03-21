@@ -1161,26 +1161,75 @@ async function startClassAndRecord(){
   // Small delay so Meet tab opens before screen picker shows
   await new Promise(r=>setTimeout(r,800));
 
-  // 2. Start screen recording
+  // 2. Start screen recording with both system audio + microphone
   try{
-    const stream=await navigator.mediaDevices.getDisplayMedia({
+    // Get screen + system audio (Meet audio)
+    const screenStream=await navigator.mediaDevices.getDisplayMedia({
       video:{frameRate:24,displaySurface:'monitor'},
-      audio:{echoCancellation:true,noiseSuppression:true}
+      audio:{echoCancellation:false,noiseSuppression:false,sampleRate:44100}
     });
+
+    // Get microphone audio (teacher's voice)
+    let micStream=null;
+    try{
+      micStream=await navigator.mediaDevices.getUserMedia({
+        audio:{echoCancellation:true,noiseSuppression:true,sampleRate:44100},
+        video:false
+      });
+    }catch(micErr){
+      console.warn('Mic not available:',micErr);
+    }
+
+    // Mix audio tracks using AudioContext
+    let finalStream=screenStream;
+    if(micStream){
+      const ctx=new AudioContext();
+      const dest=ctx.createMediaStreamDestination();
+
+      // Add system audio (screen share audio) if available
+      const screenTracks=screenStream.getAudioTracks();
+      if(screenTracks.length>0){
+        const sysSource=ctx.createMediaStreamSource(new MediaStream(screenTracks));
+        sysSource.connect(dest);
+      }
+
+      // Add microphone audio
+      const micSource=ctx.createMediaStreamSource(micStream);
+      micSource.connect(dest);
+
+      // Combine: video from screen + mixed audio
+      finalStream=new MediaStream([
+        ...screenStream.getVideoTracks(),
+        ...dest.stream.getAudioTracks()
+      ]);
+    }
+
     recChunks=[];recSecs=0;
     const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-      ?'video/webm;codecs=vp9,opus':'video/webm';
-    recMedia=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2000000});
+      ?'video/webm;codecs=vp9,opus'
+      :MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+      ?'video/webm;codecs=vp8,opus'
+      :'video/webm';
+
+    recMedia=new MediaRecorder(finalStream,{mimeType:mime,videoBitsPerSecond:2000000});
     recMedia.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};
-    recMedia.onstop=()=>{stream.getTracks().forEach(t=>t.stop());finaliseRec();};
-    stream.getVideoTracks()[0].onended=()=>{if(recMedia&&recMedia.state!=='inactive')stopRec();};
+    recMedia.onstop=()=>{
+      screenStream.getTracks().forEach(t=>t.stop());
+      if(micStream)micStream.getTracks().forEach(t=>t.stop());
+      finaliseRec();
+    };
+    screenStream.getVideoTracks()[0].onended=()=>{
+      if(recMedia&&recMedia.state!=='inactive')stopRec();
+    };
     recMedia.start(1000);
 
     // Show active bar
     document.getElementById('rec-idle-bar').style.display='none';
     document.getElementById('rec-active-bar').style.display='flex';
     const activeLink=document.getElementById('meet-active-link');
-    if(activeLink)activeLink.textContent=currentMeetUrl?'Meet open in other tab — click ↗ to switch back':'Recording screen...';
+    if(activeLink)activeLink.textContent=currentMeetUrl
+      ?'Meet open in other tab — click ↗ to switch back'
+      :'Recording screen...';
 
     recTimerInt=setInterval(()=>{
       recSecs++;
@@ -1191,10 +1240,7 @@ async function startClassAndRecord(){
 
   }catch(e){
     if(e.name!=='NotAllowedError')alert('Could not start recording: '+e.message);
-    else{
-      // User cancelled screen share — just keep Meet open
-      document.getElementById('rec-idle-bar').style.display='flex';
-    }
+    document.getElementById('rec-idle-bar').style.display='flex';
   }
 }
 
