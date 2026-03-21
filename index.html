@@ -295,14 +295,20 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
             <button class="btn" onclick="showPg('pg-ms');loadMyStudents()">← Back</button>
           </div>
 
-          <!-- Recording bar: idle state -->
-          <div id="rec-idle-bar" class="rec-idle-bar">
-            <span style="font-size:20px;">⏺</span>
-            <div style="flex:1;">
-              <div style="font-size:13px;font-weight:600;color:#444;">Class Recording</div>
-              <div style="font-size:11px;color:#999;" id="drive-status-label">Recording will be saved to admin's Google Drive</div>
+          <!-- UNIFIED: Start Class + Record -->
+          <div id="rec-idle-bar" class="rec-idle-bar" style="flex-direction:column;align-items:stretch;gap:10px;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <span style="font-size:22px;">🎥</span>
+              <div style="flex:1;">
+                <div style="font-size:14px;font-weight:700;color:#1a1a1a;">Ready to start class</div>
+                <div style="font-size:11px;color:#999;" id="drive-status-label">One click opens Meet + starts recording simultaneously</div>
+              </div>
             </div>
-            <button class="btn g" id="btn-start-rec" onclick="startRec()">⏺ Start Recording</button>
+            <div id="meet-link-preview" style="display:none;background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;font-size:12px;color:#1d4ed8;word-break:break-all;"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn g" id="btn-start-class" onclick="startClassAndRecord()" style="flex:1;padding:12px;font-size:14px;font-weight:700;">🚀 Start Class + Record</button>
+            </div>
+            <div style="font-size:11px;color:#bbb;text-align:center;">Opens Google Meet in a new tab and starts screen recording here automatically</div>
           </div>
 
           <!-- Recording bar: active state -->
@@ -310,8 +316,14 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
             <div class="rec-dot"></div>
             <span style="font-size:12px;font-weight:700;color:#c0392b;">REC</span>
             <span class="rec-timer" id="rec-timer">00:00</span>
-            <div style="flex:1;font-size:12px;color:#c0392b;">Recording in progress — screen capture active</div>
-            <button class="btn r" onclick="stopRec()">⏹ Stop &amp; Upload</button>
+            <div style="flex:1;">
+              <div style="font-size:12px;color:#c0392b;font-weight:600;">Recording in progress</div>
+              <div style="font-size:11px;color:#e57373;" id="meet-active-link"></div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn b sm" onclick="reopenMeet()">↗ Meet</button>
+              <button class="btn r" onclick="stopRec()">⏹ Stop &amp; Upload</button>
+            </div>
           </div>
 
           <!-- Upload progress -->
@@ -320,8 +332,8 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
             <div class="upload-prog"><div class="upload-prog-bar" id="upload-bar" style="width:0%"></div></div>
           </div>
 
-          <!-- Meet link panel -->
-          <div id="meet-panel" style="margin-bottom:1.2rem;"></div>
+          <!-- Meet panel hidden — no longer needed as separate section -->
+          <div id="meet-panel"></div>
 
           <!-- Saved recordings list (session only) -->
           <div>
@@ -1091,7 +1103,8 @@ function loadAdmAv(){
 
 // ── CLASS ROOM ────────────────────────────────────────
 let recMedia=null,recChunks=[],recTimerInt=null,recSecs=0,recStudentId=null;
-const sessionRecs={}; // {studentId: [{name,url,driveUrl,duration,size,date,blob}]}
+let currentMeetUrl=null;
+const sessionRecs={}; // {studentId: [{name,url,driveUrl,duration,size,date}]}
 
 function openClassRoom(sid){
   sSid=sid; recStudentId=sid;
@@ -1099,49 +1112,56 @@ function openClassRoom(sid){
   const t=db.teachers[sTid];
   document.getElementById('class-sname').textContent=s?s.name+' — Class Room':'Class Room';
 
-  // Show drive status
+  // Store meet URL globally
+  currentMeetUrl=s&&s.meet?s.meet:null;
+
+  // Show meet link preview
+  const prev=document.getElementById('meet-link-preview');
+  if(currentMeetUrl){
+    prev.style.display='block';
+    prev.textContent='📎 '+currentMeetUrl;
+  }else{
+    prev.style.display='none';
+  }
+
+  // Drive status label
   const hasDrive=t.driveUrl&&t.driveUrl.length>10;
   const driveLbl=document.getElementById('drive-status-label');
-  if(driveLbl)driveLbl.textContent=hasDrive?'✓ Recordings will upload to admin\'s Google Drive':'⚠ No Drive URL set — recordings will download locally only';
+  if(driveLbl)driveLbl.textContent=hasDrive
+    ?'✓ Recording will auto-upload to Google Drive'
+    :'⚠ No Drive URL — recording will download locally';
 
-  // Reset recording state
+  // Reset UI
   document.getElementById('rec-idle-bar').style.display='flex';
   document.getElementById('rec-active-bar').style.display='none';
   document.getElementById('upload-status').style.display='none';
 
-  renderMeetPanel(s);
   renderRecList(sid);
   navTo('pg-class',null);
 }
 
-function renderMeetPanel(s){
-  const panel=document.getElementById('meet-panel');
-  if(!s||!s.meet){
-    panel.innerHTML='<div class="nd" style="padding:1.2rem;">No Google Meet link set. Go to <strong>My Students → Meet Link</strong> to add one.</div>';
-    return;
+function openMeetOnly(){
+  if(!currentMeetUrl){alert('No Google Meet link set for this student. Go to My Students → Meet Link to add one.');return;}
+  window.open(currentMeetUrl,'_blank');
+}
+
+function reopenMeet(){
+  if(currentMeetUrl)window.open(currentMeetUrl,'_blank');
+}
+
+async function startClassAndRecord(){
+  // 1. Open Meet in new tab first
+  if(currentMeetUrl){
+    window.open(currentMeetUrl,'_blank');
+  }else{
+    const go=confirm('No Google Meet link set for this student. Start recording anyway?\n\nYou can still record your screen manually.');
+    if(!go)return;
   }
-  panel.innerHTML=`
-    <div class="meet-card">
-      <div style="font-size:36px;margin-bottom:10px;">🎥</div>
-      <div style="font-size:17px;font-weight:700;color:#f5c842;margin-bottom:6px;">Google Meet</div>
-      <div style="font-size:12px;color:#777;margin-bottom:18px;word-break:break-all;">${s.meet}</div>
-      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-        <button class="btn g" style="padding:10px 22px;font-size:14px;" onclick="window.open('${s.meet}','_blank')">🚀 Open Meet in New Tab</button>
-        <button class="btn" style="padding:10px 16px;font-size:13px;background:rgba(255,255,255,.08);color:#ccc;border-color:rgba(255,255,255,.15);" onclick="copyText('${s.meet}',this)">📋 Copy Link</button>
-      </div>
-      <div style="margin-top:14px;font-size:11px;color:#555;">Open Meet in a new tab → start screen share back here to record</div>
-    </div>`;
-}
 
-function copyText(txt,btn){
-  navigator.clipboard.writeText(txt).then(()=>{
-    const orig=btn.innerHTML;btn.innerHTML='✓ Copied!';
-    setTimeout(()=>btn.innerHTML=orig,2000);
-  });
-}
+  // Small delay so Meet tab opens before screen picker shows
+  await new Promise(r=>setTimeout(r,800));
 
-// ── RECORDING ─────────────────────────────────────────
-async function startRec(){
+  // 2. Start screen recording
   try{
     const stream=await navigator.mediaDevices.getDisplayMedia({
       video:{frameRate:24,displaySurface:'monitor'},
@@ -1155,18 +1175,40 @@ async function startRec(){
     recMedia.onstop=()=>{stream.getTracks().forEach(t=>t.stop());finaliseRec();};
     stream.getVideoTracks()[0].onended=()=>{if(recMedia&&recMedia.state!=='inactive')stopRec();};
     recMedia.start(1000);
+
+    // Show active bar
     document.getElementById('rec-idle-bar').style.display='none';
     document.getElementById('rec-active-bar').style.display='flex';
+    const activeLink=document.getElementById('meet-active-link');
+    if(activeLink)activeLink.textContent=currentMeetUrl?'Meet open in other tab — click ↗ to switch back':'Recording screen...';
+
     recTimerInt=setInterval(()=>{
       recSecs++;
       const m=String(Math.floor(recSecs/60)).padStart(2,'0');
       const s=String(recSecs%60).padStart(2,'0');
       document.getElementById('rec-timer').textContent=m+':'+s;
     },1000);
+
   }catch(e){
     if(e.name!=='NotAllowedError')alert('Could not start recording: '+e.message);
+    else{
+      // User cancelled screen share — just keep Meet open
+      document.getElementById('rec-idle-bar').style.display='flex';
+    }
   }
 }
+
+function renderMeetPanel(){} // kept for compatibility, no longer used
+
+function copyText(txt,btn){
+  navigator.clipboard.writeText(txt).then(()=>{
+    const orig=btn.innerHTML;btn.innerHTML='✓ Copied!';
+    setTimeout(()=>btn.innerHTML=orig,2000);
+  });
+}
+
+// ── RECORDING ─────────────────────────────────────────
+function startRec(){startClassAndRecord();} // alias for compatibility
 
 function stopRec(){
   if(recMedia&&recMedia.state!=='inactive')recMedia.stop();
