@@ -1154,82 +1154,121 @@ async function startClassAndRecord(){
   if(currentMeetUrl){
     window.open(currentMeetUrl,'_blank');
   }else{
-    const go=confirm('No Google Meet link set for this student. Start recording anyway?\n\nYou can still record your screen manually.');
+    const go=confirm('No Google Meet link set for this student. Start recording anyway?');
     if(!go)return;
   }
 
-  // Small delay so Meet tab opens before screen picker shows
   await new Promise(r=>setTimeout(r,800));
 
-  // 2. Start screen recording with both system audio + microphone
+  // 2. Request microphone FIRST (before screen share)
+  let micStream=null;
   try{
-    // Get screen + system audio (Meet audio)
-    const screenStream=await navigator.mediaDevices.getDisplayMedia({
-      video:{frameRate:24,displaySurface:'monitor'},
-      audio:{echoCancellation:false,noiseSuppression:false,sampleRate:44100}
+    micStream=await navigator.mediaDevices.getUserMedia({
+      audio:{
+        echoCancellation:true,
+        noiseSuppression:true,
+        autoGainControl:true,
+        sampleRate:44100
+      },
+      video:false
     });
+  }catch(micErr){
+    const proceed=confirm('Microphone access was denied or not available.\n\nThe recording will only capture system audio (student voice from Meet) but NOT your voice.\n\nContinue anyway?');
+    if(!proceed)return;
+  }
 
-    // Get microphone audio (teacher's voice)
-    let micStream=null;
-    try{
-      micStream=await navigator.mediaDevices.getUserMedia({
-        audio:{echoCancellation:true,noiseSuppression:true,sampleRate:44100},
-        video:false
-      });
-    }catch(micErr){
-      console.warn('Mic not available:',micErr);
-    }
-
-    // Mix audio tracks using AudioContext
-    let finalStream=screenStream;
-    if(micStream){
-      const ctx=new AudioContext();
-      const dest=ctx.createMediaStreamDestination();
-
-      // Add system audio (screen share audio) if available
-      const screenTracks=screenStream.getAudioTracks();
-      if(screenTracks.length>0){
-        const sysSource=ctx.createMediaStreamSource(new MediaStream(screenTracks));
-        sysSource.connect(dest);
+  // 3. Now request screen share
+  let screenStream=null;
+  try{
+    screenStream=await navigator.mediaDevices.getDisplayMedia({
+      video:{frameRate:24},
+      audio:{
+        echoCancellation:false,
+        noiseSuppression:false,
+        autoGainControl:false,
+        sampleRate:44100
       }
+    });
+  }catch(e){
+    if(micStream)micStream.getTracks().forEach(t=>t.stop());
+    if(e.name!=='NotAllowedError')alert('Could not start screen recording: '+e.message);
+    document.getElementById('rec-idle-bar').style.display='flex';
+    return;
+  }
 
-      // Add microphone audio
-      const micSource=ctx.createMediaStreamSource(micStream);
-      micSource.connect(dest);
+  // 4. Mix audio: mic + system audio using AudioContext
+  try{
+    const audioCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:44100});
+    const destination=audioCtx.createMediaStreamDestination();
 
-      // Combine: video from screen + mixed audio
-      finalStream=new MediaStream([
-        ...screenStream.getVideoTracks(),
-        ...dest.stream.getAudioTracks()
-      ]);
+    // Add microphone track
+    if(micStream&&micStream.getAudioTracks().length>0){
+      const micSource=audioCtx.createMediaStreamSource(micStream);
+      // Boost mic volume slightly
+      const micGain=audioCtx.createGain();
+      micGain.gain.value=1.5;
+      micSource.connect(micGain);
+      micGain.connect(destination);
     }
 
+    // Add system audio track (Meet audio — student voice)
+    const sysAudioTracks=screenStream.getAudioTracks();
+    if(sysAudioTracks.length>0){
+      const sysSource=audioCtx.createMediaStreamSource(
+        new MediaStream(sysAudioTracks)
+      );
+      const sysGain=audioCtx.createGain();
+      sysGain.gain.value=1.0;
+      sysSource.connect(sysGain);
+      sysGain.connect(destination);
+    }
+
+    // Build final stream: screen video + mixed audio
+    const mixedAudioTrack=destination.stream.getAudioTracks()[0];
+    const videoTrack=screenStream.getVideoTracks()[0];
+
+    const finalStream=new MediaStream();
+    if(videoTrack)finalStream.addTrack(videoTrack);
+    if(mixedAudioTrack)finalStream.addTrack(mixedAudioTrack);
+
+    // 5. Start MediaRecorder on the final mixed stream
     recChunks=[];recSecs=0;
-    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-      ?'video/webm;codecs=vp9,opus'
-      :MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-      ?'video/webm;codecs=vp8,opus'
-      :'video/webm';
+    const mime=
+      MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')?'video/webm;codecs=vp9,opus':
+      MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':
+      'video/webm';
 
     recMedia=new MediaRecorder(finalStream,{mimeType:mime,videoBitsPerSecond:2000000});
-    recMedia.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};
+    recMedia.ondataavailable=e=>{if(e.data&&e.data.size>0)recChunks.push(e.data);};
     recMedia.onstop=()=>{
       screenStream.getTracks().forEach(t=>t.stop());
       if(micStream)micStream.getTracks().forEach(t=>t.stop());
+      audioCtx.close();
       finaliseRec();
     };
-    screenStream.getVideoTracks()[0].onended=()=>{
-      if(recMedia&&recMedia.state!=='inactive')stopRec();
-    };
+
+    // Stop recording if screen share ends
+    if(videoTrack){
+      videoTrack.onended=()=>{
+        if(recMedia&&recMedia.state!=='inactive')stopRec();
+      };
+    }
+
     recMedia.start(1000);
 
-    // Show active bar
+    // Show active recording bar
     document.getElementById('rec-idle-bar').style.display='none';
     document.getElementById('rec-active-bar').style.display='flex';
     const activeLink=document.getElementById('meet-active-link');
-    if(activeLink)activeLink.textContent=currentMeetUrl
-      ?'Meet open in other tab — click ↗ to switch back'
-      :'Recording screen...';
+    if(activeLink){
+      const hasmic=micStream&&micStream.getAudioTracks().length>0;
+      const hasSys=sysAudioTracks.length>0;
+      activeLink.textContent=
+        hasmic&&hasSys?'🎤 Mic + 🔊 System audio — both recording':
+        hasmic?'🎤 Mic only — tick "Share audio" next time for student voice':
+        hasSys?'🔊 System audio only — mic not detected':
+        '⚠ No audio detected';
+    }
 
     recTimerInt=setInterval(()=>{
       recSecs++;
@@ -1238,8 +1277,10 @@ async function startClassAndRecord(){
       document.getElementById('rec-timer').textContent=m+':'+s;
     },1000);
 
-  }catch(e){
-    if(e.name!=='NotAllowedError')alert('Could not start recording: '+e.message);
+  }catch(err){
+    screenStream.getTracks().forEach(t=>t.stop());
+    if(micStream)micStream.getTracks().forEach(t=>t.stop());
+    alert('Audio mixing failed: '+err.message);
     document.getElementById('rec-idle-bar').style.display='flex';
   }
 }
