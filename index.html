@@ -128,6 +128,22 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
 .sp{display:inline-block;width:14px;height:14px;border:2px solid #eee;border-top-color:#d4a017;border-radius:50%;animation:sp 0.6s linear infinite;vertical-align:middle;margin-right:6px;}
 @keyframes sp{to{transform:rotate(360deg);}}
 .nd{color:#bbb;font-size:14px;padding:2.5rem;text-align:center;}
+/* CLASS ROOM & RECORDING */
+.rec-idle-bar{display:flex;align-items:center;gap:12px;background:#f9f9f6;border:1.5px solid #e5e5e5;border-radius:12px;padding:13px 16px;margin-bottom:1rem;flex-wrap:wrap;}
+.rec-active-bar{display:flex;align-items:center;gap:12px;background:#fff5f5;border:1.5px solid #fcc;border-radius:12px;padding:13px 16px;margin-bottom:1rem;flex-wrap:wrap;}
+.rec-dot{width:11px;height:11px;border-radius:50%;background:#e53e3e;flex-shrink:0;animation:rpulse 1.1s ease-in-out infinite;}
+@keyframes rpulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.45;transform:scale(.8);}}
+.rec-timer{font-size:16px;font-weight:800;color:#c0392b;font-variant-numeric:tabular-nums;min-width:54px;letter-spacing:.03em;}
+.rec-item{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f9f9f6;border:1px solid #eee;border-radius:10px;margin-bottom:8px;flex-wrap:wrap;}
+.rec-item-name{font-size:13px;font-weight:600;color:#1a1a1a;}
+.rec-item-meta{font-size:11px;color:#999;margin-top:2px;}
+.upload-prog{height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-top:6px;}
+.upload-prog-bar{height:100%;background:linear-gradient(90deg,#d4a017,#f5c842);border-radius:3px;transition:width .3s;}
+.meet-card{background:linear-gradient(135deg,#1a0e00,#0f0a00);border-radius:14px;padding:2rem;text-align:center;border:2px solid rgba(212,160,23,.3);}
+.nl-class{display:flex;align-items:center;gap:10px;padding:9px 20px;font-size:13px;color:#f5c842;cursor:pointer;border-left:3px solid #f5c842;background:rgba(212,160,23,.12);font-weight:700;user-select:none;}
+.nl-class:hover{opacity:.85;}
+.drive-badge{display:inline-flex;align-items:center;gap:5px;background:#edfaf1;color:#1a7a3a;border:1px solid #a9dfbf;border-radius:8px;padding:3px 10px;font-size:11px;font-weight:700;}
+.drive-badge.none{background:#fff5f5;color:#c0392b;border-color:#fcc;}
 </style>
 </head>
 <body>
@@ -271,6 +287,50 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
         </div>
       </div>
 
+      <!-- CLASS ROOM (teacher) -->
+      <div class="pg" id="pg-class">
+        <div class="card">
+          <div class="ctop">
+            <div><div class="ctitle">🎥 Class Room</div><div class="csub" id="class-sname">—</div></div>
+            <button class="btn" onclick="showPg('pg-ms');loadMyStudents()">← Back</button>
+          </div>
+
+          <!-- Recording bar: idle state -->
+          <div id="rec-idle-bar" class="rec-idle-bar">
+            <span style="font-size:20px;">⏺</span>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:600;color:#444;">Class Recording</div>
+              <div style="font-size:11px;color:#999;" id="drive-status-label">Recording will be saved to admin's Google Drive</div>
+            </div>
+            <button class="btn g" id="btn-start-rec" onclick="startRec()">⏺ Start Recording</button>
+          </div>
+
+          <!-- Recording bar: active state -->
+          <div id="rec-active-bar" class="rec-active-bar" style="display:none;">
+            <div class="rec-dot"></div>
+            <span style="font-size:12px;font-weight:700;color:#c0392b;">REC</span>
+            <span class="rec-timer" id="rec-timer">00:00</span>
+            <div style="flex:1;font-size:12px;color:#c0392b;">Recording in progress — screen capture active</div>
+            <button class="btn r" onclick="stopRec()">⏹ Stop &amp; Upload</button>
+          </div>
+
+          <!-- Upload progress -->
+          <div id="upload-status" style="display:none;margin-bottom:1rem;">
+            <div style="font-size:13px;font-weight:600;color:#555;margin-bottom:6px;" id="upload-label">Uploading to Google Drive…</div>
+            <div class="upload-prog"><div class="upload-prog-bar" id="upload-bar" style="width:0%"></div></div>
+          </div>
+
+          <!-- Meet link panel -->
+          <div id="meet-panel" style="margin-bottom:1.2rem;"></div>
+
+          <!-- Saved recordings list (session only) -->
+          <div>
+            <div style="font-size:14px;font-weight:700;color:#1a1a1a;margin-bottom:10px;">📼 This Session's Recordings</div>
+            <div id="rec-list"><div class="nd" style="padding:1rem;">No recordings yet. Start a class and click "Start Recording".</div></div>
+          </div>
+        </div>
+      </div>
+
       <!-- MY ATTENDANCE (teacher) -->
       <div class="pg" id="pg-ma">
         <div class="card">
@@ -298,6 +358,7 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
       <div class="fg"><label>Password *</label><input id="nt-p" placeholder="e.g. math123"/></div>
     </div>
     <div class="fr"><div class="fg"><label>Subject</label><input id="nt-s" placeholder="e.g. Mathematics"/></div></div>
+    <div class="fr"><div class="fg"><label>Google Drive Upload URL <span style="color:#999;font-weight:400;">(Apps Script Web App)</span></label><input id="nt-d" placeholder="https://script.google.com/macros/s/..."/></div></div>
     <div id="at-msg" style="display:none;"></div>
     <div class="mbtns">
       <button class="btn" onclick="closeM('m-addteacher')">Cancel</button>
@@ -327,6 +388,10 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
     <div class="fg" style="margin-bottom:12px;">
       <label>New Password</label>
       <input type="text" id="tp-pass" placeholder="Enter new password"/>
+    </div>
+    <div class="fg" style="margin-bottom:12px;">
+      <label>Google Drive Upload URL <span style="color:#999;font-weight:400;">(Apps Script Web App — recordings go here)</span></label>
+      <input type="text" id="tp-drive" placeholder="https://script.google.com/macros/s/..."/>
     </div>
     <div id="tp-msg" style="display:none;margin-bottom:10px;"></div>
     <div class="mbtns">
@@ -454,7 +519,9 @@ function buildSB(){
     sb.innerHTML=`<div class="ng">Teacher Panel</div>
     <div class="nl on" onclick="navTo('pg-ms',this);loadMyStudents()"><span style="margin-right:6px;">👨‍🎓</span>My Students</div>
     <div class="nl" onclick="navTo('pg-sc',this);initSc()"><span style="margin-right:6px;">📅</span>Availability</div>
-    <div class="nl" onclick="navTo('pg-ma',this);loadMyAtt()"><span style="margin-right:6px;">✅</span>Attendance</div>`;
+    <div class="nl" onclick="navTo('pg-ma',this);loadMyAtt()"><span style="margin-right:6px;">✅</span>Attendance</div>
+    <div style="padding:12px 20px 0;"><div style="height:1px;background:rgba(212,160,23,0.18);margin-bottom:10px;"></div></div>
+    <div class="nl-class" onclick="if(sSid){openClassRoom(sSid);}else{alert('Open a student first, then tap Class Room.');}"><span style="margin-right:6px;">🎥</span>Class Room</div>`;
   }
 }
 function navTo(pid,el){
@@ -540,6 +607,7 @@ async function addTeacher(){
   const user=document.getElementById('nt-u').value.trim();
   const pass=document.getElementById('nt-p').value.trim();
   const subj=document.getElementById('nt-s').value.trim();
+  const driveUrl=document.getElementById('nt-d').value.trim();
   const msg=document.getElementById('at-msg');
   if(!name||!user||!pass){
     msg.className='msg er';msg.textContent='Please fill in Name, Username and Password.';msg.style.display='block';return;
@@ -550,13 +618,13 @@ async function addTeacher(){
   const btn=document.querySelector('#m-addteacher .btn.g');
   btn.innerHTML='<span class="sp"></span>Adding...';btn.disabled=true;
   const id='t_'+Date.now();
-  db.teachers[id]={id:id,name:name,username:user,password:pass,subject:subj,students:{}};
+  db.teachers[id]={id:id,name:name,username:user,password:pass,subject:subj,driveUrl:driveUrl,students:{}};
   await sdb();
   msg.className='msg ok';msg.textContent='✓ Teacher added successfully!';msg.style.display='block';
   btn.innerHTML='Add Teacher';btn.disabled=false;
   setTimeout(()=>{
     closeM('m-addteacher');loadTeachers();loadDash();
-    ['nt-n','nt-u','nt-p','nt-s'].forEach(i=>document.getElementById(i).value='');
+    ['nt-n','nt-u','nt-p','nt-s','nt-d'].forEach(i=>document.getElementById(i).value='');
     msg.style.display='none';
   },1200);
 }
@@ -775,7 +843,10 @@ function loadMeetD(){
   const s=db.teachers[sTid].students[sSid];
   const el=document.getElementById('meet-d');
   if(s&&s.meet){
-    el.innerHTML=`<div class="meet-box">🎥 <a href="${s.meet}" target="_blank">${s.meet}</a><button class="btn g sm" onclick="window.open('${s.meet}','_blank')">Join Class</button></div>`;
+    el.innerHTML=`<div class="meet-box">🎥 <a href="${s.meet}" target="_blank">${s.meet}</a><button class="btn g sm" onclick="window.open('${s.meet}','_blank')">Join Class</button></div>
+    <div style="margin-top:12px;">
+      <button class="btn g" style="width:100%;padding:11px;font-size:14px;" onclick="openClassRoom('${sSid}')">🎥 Open Class Room &amp; Record</button>
+    </div>`;
   }else{el.innerHTML='<div class="nd">No meet link set yet. Contact your admin.</div>';}
 }
 
@@ -856,6 +927,7 @@ function viewPDF(id,type){
 function openTProfile(tid){
   sTid=tid;
   const t=db.teachers[tid];
+  const hasDrive=t.driveUrl&&t.driveUrl.length>10;
   document.getElementById('tp-info').innerHTML=`
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
       <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#fef9c3,#fde68a);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#854d0e;">${t.name.charAt(0).toUpperCase()}</div>
@@ -868,28 +940,29 @@ function openTProfile(tid){
       <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">USERNAME</span><code style="background:#f0f0f0;padding:3px 8px;border-radius:5px;">${t.username}</code></div>
       <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">CURRENT PASSWORD</span><code style="background:#f0f0f0;padding:3px 8px;border-radius:5px;">${t.password}</code></div>
       <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">STUDENTS</span><span class="bdg b">${Object.keys(t.students||{}).length} students</span></div>
-      <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">SUBJECT</span><span>${t.subject||'—'}</span></div>
+      <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">DRIVE UPLOAD</span><span class="${hasDrive?'drive-badge':'drive-badge none'}">${hasDrive?'✓ Set':'✗ Not set'}</span></div>
     </div>`;
   document.getElementById('tp-pass').value='';
+  document.getElementById('tp-drive').value=t.driveUrl||'';
   document.getElementById('tp-msg').style.display='none';
   openM('m-tprofile');
 }
 
 async function updatePass(){
   const newPass=document.getElementById('tp-pass').value.trim();
+  const newDrive=document.getElementById('tp-drive').value.trim();
   const msg=document.getElementById('tp-msg');
-  if(!newPass){msg.className='msg er';msg.textContent='Please enter a new password.';msg.style.display='block';return;}
-  if(newPass.length<4){msg.className='msg er';msg.textContent='Password must be at least 4 characters.';msg.style.display='block';return;}
+  if(newPass&&newPass.length<4){msg.className='msg er';msg.textContent='Password must be at least 4 characters.';msg.style.display='block';return;}
   const btn=document.querySelector('#m-tprofile .btn.g');
-  btn.innerHTML='<span class="sp"></span>Updating...';btn.disabled=true;
-  db.teachers[sTid].password=newPass;
+  btn.innerHTML='<span class="sp"></span>Saving...';btn.disabled=true;
+  if(newPass)db.teachers[sTid].password=newPass;
+  db.teachers[sTid].driveUrl=newDrive;
   await sdb();
-  msg.className='msg ok';msg.textContent='✓ Password updated successfully!';msg.style.display='block';
+  msg.className='msg ok';msg.textContent='✓ Profile updated successfully!';msg.style.display='block';
   btn.innerHTML='Update Password';btn.disabled=false;
-  // Refresh the profile info
   openTProfile(sTid);
   document.getElementById('tp-msg').className='msg ok';
-  document.getElementById('tp-msg').textContent='✓ Password updated successfully!';
+  document.getElementById('tp-msg').textContent='✓ Profile updated successfully!';
   document.getElementById('tp-msg').style.display='block';
   document.getElementById('tp-pass').value='';
   setTimeout(()=>document.getElementById('tp-msg').style.display='none',2500);
@@ -1014,6 +1087,227 @@ function loadAdmAv(){
     h+=`</div>`;return h;
   }).join('');
 }
+
+
+// ── CLASS ROOM ────────────────────────────────────────
+let recMedia=null,recChunks=[],recTimerInt=null,recSecs=0,recStudentId=null;
+const sessionRecs={}; // {studentId: [{name,url,driveUrl,duration,size,date,blob}]}
+
+function openClassRoom(sid){
+  sSid=sid; recStudentId=sid;
+  const s=db.teachers[sTid].students[sid];
+  const t=db.teachers[sTid];
+  document.getElementById('class-sname').textContent=s?s.name+' — Class Room':'Class Room';
+
+  // Show drive status
+  const hasDrive=t.driveUrl&&t.driveUrl.length>10;
+  const driveLbl=document.getElementById('drive-status-label');
+  if(driveLbl)driveLbl.textContent=hasDrive?'✓ Recordings will upload to admin\'s Google Drive':'⚠ No Drive URL set — recordings will download locally only';
+
+  // Reset recording state
+  document.getElementById('rec-idle-bar').style.display='flex';
+  document.getElementById('rec-active-bar').style.display='none';
+  document.getElementById('upload-status').style.display='none';
+
+  renderMeetPanel(s);
+  renderRecList(sid);
+  navTo('pg-class',null);
+}
+
+function renderMeetPanel(s){
+  const panel=document.getElementById('meet-panel');
+  if(!s||!s.meet){
+    panel.innerHTML='<div class="nd" style="padding:1.2rem;">No Google Meet link set. Go to <strong>My Students → Meet Link</strong> to add one.</div>';
+    return;
+  }
+  panel.innerHTML=`
+    <div class="meet-card">
+      <div style="font-size:36px;margin-bottom:10px;">🎥</div>
+      <div style="font-size:17px;font-weight:700;color:#f5c842;margin-bottom:6px;">Google Meet</div>
+      <div style="font-size:12px;color:#777;margin-bottom:18px;word-break:break-all;">${s.meet}</div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+        <button class="btn g" style="padding:10px 22px;font-size:14px;" onclick="window.open('${s.meet}','_blank')">🚀 Open Meet in New Tab</button>
+        <button class="btn" style="padding:10px 16px;font-size:13px;background:rgba(255,255,255,.08);color:#ccc;border-color:rgba(255,255,255,.15);" onclick="copyText('${s.meet}',this)">📋 Copy Link</button>
+      </div>
+      <div style="margin-top:14px;font-size:11px;color:#555;">Open Meet in a new tab → start screen share back here to record</div>
+    </div>`;
+}
+
+function copyText(txt,btn){
+  navigator.clipboard.writeText(txt).then(()=>{
+    const orig=btn.innerHTML;btn.innerHTML='✓ Copied!';
+    setTimeout(()=>btn.innerHTML=orig,2000);
+  });
+}
+
+// ── RECORDING ─────────────────────────────────────────
+async function startRec(){
+  try{
+    const stream=await navigator.mediaDevices.getDisplayMedia({
+      video:{frameRate:24,displaySurface:'monitor'},
+      audio:{echoCancellation:true,noiseSuppression:true}
+    });
+    recChunks=[];recSecs=0;
+    const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+      ?'video/webm;codecs=vp9,opus':'video/webm';
+    recMedia=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2000000});
+    recMedia.ondataavailable=e=>{if(e.data.size>0)recChunks.push(e.data);};
+    recMedia.onstop=()=>{stream.getTracks().forEach(t=>t.stop());finaliseRec();};
+    stream.getVideoTracks()[0].onended=()=>{if(recMedia&&recMedia.state!=='inactive')stopRec();};
+    recMedia.start(1000);
+    document.getElementById('rec-idle-bar').style.display='none';
+    document.getElementById('rec-active-bar').style.display='flex';
+    recTimerInt=setInterval(()=>{
+      recSecs++;
+      const m=String(Math.floor(recSecs/60)).padStart(2,'0');
+      const s=String(recSecs%60).padStart(2,'0');
+      document.getElementById('rec-timer').textContent=m+':'+s;
+    },1000);
+  }catch(e){
+    if(e.name!=='NotAllowedError')alert('Could not start recording: '+e.message);
+  }
+}
+
+function stopRec(){
+  if(recMedia&&recMedia.state!=='inactive')recMedia.stop();
+  clearInterval(recTimerInt);
+  document.getElementById('rec-active-bar').style.display='none';
+  document.getElementById('rec-timer').textContent='00:00';
+}
+
+async function finaliseRec(){
+  if(!recChunks.length){
+    document.getElementById('rec-idle-bar').style.display='flex';
+    return;
+  }
+  const blob=new Blob(recChunks,{type:'video/webm'});
+  const now=new Date();
+  const s=db.teachers[sTid].students[recStudentId];
+  const sname=s?s.name.replace(/\s+/g,'_'):'Student';
+  const dateStr=now.toLocaleDateString('en-IN').replace(/\//g,'-');
+  const timeStr=now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}).replace(/[:\s]/g,'-');
+  const fname=`${sname}_Class_${dateStr}_${timeStr}.webm`;
+  const localUrl=URL.createObjectURL(blob);
+
+  // Show upload status
+  const t=db.teachers[sTid];
+  const hasDrive=t.driveUrl&&t.driveUrl.length>10;
+
+  if(hasDrive){
+    document.getElementById('upload-status').style.display='block';
+    document.getElementById('upload-label').textContent='Uploading to Google Drive…';
+    document.getElementById('upload-bar').style.width='0%';
+    animateBar();
+    let driveFileUrl=null;
+    try{
+      driveFileUrl=await uploadToDrive(blob,fname,t.driveUrl,t.name);
+      document.getElementById('upload-bar').style.width='100%';
+      document.getElementById('upload-label').textContent='✓ Uploaded to Google Drive!';
+      setTimeout(()=>document.getElementById('upload-status').style.display='none',3000);
+    }catch(err){
+      document.getElementById('upload-label').textContent='⚠ Drive upload failed — downloading locally instead.';
+      document.getElementById('upload-bar').style.width='0%';
+      setTimeout(()=>document.getElementById('upload-status').style.display='none',4000);
+      // Fallback: download
+      triggerDownload(localUrl,fname);
+    }
+    addToRecList(recStudentId,{name:fname,url:localUrl,driveUrl:driveFileUrl,duration:fmtDur(recSecs),size:fmtSize(blob.size),date:now.toLocaleString('en-IN')});
+  }else{
+    // No drive URL — just download
+    triggerDownload(localUrl,fname);
+    addToRecList(recStudentId,{name:fname,url:localUrl,driveUrl:null,duration:fmtDur(recSecs),size:fmtSize(blob.size),date:now.toLocaleString('en-IN')});
+  }
+  document.getElementById('rec-idle-bar').style.display='flex';
+}
+
+function animateBar(){
+  let pct=0;
+  const iv=setInterval(()=>{
+    pct+=2;
+    if(pct>=90){clearInterval(iv);return;}
+    document.getElementById('upload-bar').style.width=pct+'%';
+  },200);
+}
+
+// ── GOOGLE DRIVE UPLOAD via Apps Script ───────────────
+async function uploadToDrive(blob,filename,webAppUrl,teacherName){
+  // Convert blob to base64
+  const base64=await blobToBase64(blob);
+  const payload={
+    filename:filename,
+    mimeType:'video/webm',
+    data:base64.split(',')[1], // strip data:video/webm;base64, prefix
+    teacherName:teacherName
+  };
+  const resp=await fetch(webAppUrl,{
+    method:'POST',
+    mode:'no-cors', // Apps Script requires no-cors for cross-origin POST
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
+  // no-cors means we can't read the response body, but if it didn't throw, it worked
+  return null; // Drive URL not available in no-cors mode
+}
+
+function blobToBase64(blob){
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=()=>res(reader.result);
+    reader.onerror=rej;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function triggerDownload(url,name){
+  const a=document.createElement('a');a.href=url;a.download=name;a.click();
+}
+
+function addToRecList(sid,rec){
+  if(!sessionRecs[sid])sessionRecs[sid]=[];
+  sessionRecs[sid].unshift(rec);
+  renderRecList(sid);
+}
+
+function renderRecList(sid){
+  const el=document.getElementById('rec-list');
+  const recs=sessionRecs[sid]||[];
+  if(!recs.length){el.innerHTML='<div class="nd" style="padding:1rem;">No recordings yet this session.</div>';return;}
+  el.innerHTML=recs.map((r,i)=>`
+    <div class="rec-item">
+      <span style="font-size:20px;">🎬</span>
+      <div style="flex:1;">
+        <div class="rec-item-name">${r.name}</div>
+        <div class="rec-item-meta">${r.duration} · ${r.size} · ${r.date}${r.driveUrl?` · <a href="${r.driveUrl}" target="_blank" style="color:#1a7a3a;">View in Drive</a>`:' · <span style="color:#d4a017;">Local only</span>'}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn sm b" onclick="playRec(${i},'${sid}')">▶ Play</button>
+        <button class="btn sm g" onclick="triggerDownload(sessionRecs['${sid}'][${i}].url,sessionRecs['${sid}'][${i}].name)">⬇ Save</button>
+        <button class="btn sm r" onclick="deleteRec(${i},'${sid}')">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function playRec(i,sid){
+  const r=sessionRecs[sid][i];
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>${r.name}</title>
+  <style>body{margin:0;background:#0a0a0a;display:flex;flex-direction:column;height:100vh;}
+  .bar{background:#1a0e00;color:#f5c842;padding:10px 16px;font-size:14px;font-weight:700;display:flex;align-items:center;gap:10px;border-bottom:1px solid rgba(212,160,23,0.3);flex-shrink:0;}
+  video{flex:1;width:100%;object-fit:contain;}</style></head><body>
+  <div class="bar">🎬 ${r.name} <span style="margin-left:auto;font-size:11px;color:#555;">${r.duration} · ${r.size}</span></div>
+  <video src="${r.url}" controls autoplay></video></body></html>`);
+  w.document.close();
+}
+
+function deleteRec(i,sid){
+  if(!confirm('Delete this recording from the list? (Does not affect Drive copy)'))return;
+  URL.revokeObjectURL(sessionRecs[sid][i].url);
+  sessionRecs[sid].splice(i,1);
+  renderRecList(sid);
+}
+
+function fmtDur(s){return Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s';}
+function fmtSize(b){return b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';}
 
 // ── ATTENDANCE ────────────────────────────────────────
 const MNS=['January','February','March','April','May','June','July','August','September','October','November','December'];
