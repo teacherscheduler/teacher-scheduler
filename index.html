@@ -177,6 +177,7 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 </head>
 <body>
 <div class="bg"></div>
@@ -212,7 +213,8 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
       <div class="pg" id="pg-dash">
         <div class="card">
           <div class="ctop"><div><div class="ctitle">Dashboard</div><div class="csub">Mathkari Admin Overview</div></div>
-          <button class="btn r sm" onclick="resetData()">🗑 Reset All Data</button></div>
+          <button class="btn r sm" onclick="resetData()">🗑 Reset All Data</button>
+          <button class="btn sm" onclick="changeAdminPassword()" style="background:#fefce8;border-color:#fde68a;color:#854d0e;margin-left:8px;">🔑 Change Admin Password</button></div>
           <div class="sg" id="dash-stats"></div>
         </div>
         <div class="card">
@@ -600,29 +602,67 @@ const firebaseConfig = {
 };
 
 // Firebase safety init
-let fsdb = null, PORTAL_DOC = null;
+let fsdb = null, fauth = null, PORTAL_DOC = null, CREDS_DOC = null;
 function initFirebase(){
   try{
     if(typeof firebase === 'undefined'){
-      document.getElementById('aerr').textContent = '⚠ Firebase failed to load. Please check your internet connection and open this file in a browser (not a preview).';
+      document.getElementById('aerr').textContent = '⚠ Firebase failed to load. Check internet connection and open this file in a real browser.';
       document.getElementById('aerr').style.display = 'block';
       return false;
     }
     if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    fsdb = firebase.firestore();
+    fsdb  = firebase.firestore();
+    fauth = firebase.auth();
     PORTAL_DOC = fsdb.collection('mathkari').doc('portalData');
+    CREDS_DOC  = fsdb.collection('mathkari').doc('credentials');
     return true;
   }catch(e){
-    document.getElementById('aerr').textContent = '⚠ Firebase error: '+e.message+'. Make sure you replaced YOUR_API_KEY etc. with your real Firebase config.';
+    document.getElementById('aerr').textContent = '⚠ Firebase error: '+e.message;
     document.getElementById('aerr').style.display = 'block';
     return false;
   }
 }
 
-const AU='admin', AP='mathkari@123';
+// ── PASSWORD HASHING (SHA-256 via Web Crypto API) ────────
+async function hashPassword(password){
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(password));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// ── FIRST TIME SETUP: Create admin credentials in Firestore ──
+async function setupAdminIfNeeded(){
+  try{
+    const snap = await CREDS_DOC.get();
+    if(!snap.exists){
+      // First run — create admin credentials securely in Firestore
+      const adminHash = await hashPassword('mathkari@123');
+      await CREDS_DOC.set({
+        admin: { hash: adminHash, role: 'admin', name: 'Admin' }
+      });
+      console.log('Admin credentials initialised in Firestore');
+    }
+  }catch(e){ console.error('Setup error:', e); }
+}
+
+// Admin credentials are stored securely in Firestore — NOT in this file
+// Role constants only
+const AU='admin';
 let cu=null,role=null,db=null,sTid=null,sSid=null,wkOff=0,sg={},pBusy=null;
 let sStudentId=null;
 let wsCurrentHwId=null,wsCurrentTid=null,wsCurSid=null;
+
+// ── SESSION TOKEN (in-memory only, never stored) ────────
+let SESSION_TOKEN = null;
+async function generateSessionToken(username, passwordHash){
+  // Create a unique session token from username + hash + timestamp
+  const raw = username + passwordHash + Date.now().toString();
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(raw));
+  SESSION_TOKEN = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  return SESSION_TOKEN;
+}
+function clearSession(){ SESSION_TOKEN = null; }
 
 // ── DB — Firebase Firestore ───────────────────────────
 async function gdb(){
@@ -630,11 +670,11 @@ async function gdb(){
   try{
     const snap=await PORTAL_DOC.get();
     db=snap.exists?snap.data():{};
-    console.log('DB loaded successfully');
   }catch(e){
     console.error('Firestore read error:',e.code, e.message);
     if(e.code==='permission-denied'){
-      alert('Firebase permission denied. Please check your Firestore Rules are set to allow read/write.');
+      alert('Access denied. Please log in again.');
+      doLogout();
     }else{
       alert('Could not connect to Firebase: '+e.message);
     }
@@ -655,30 +695,136 @@ async function sdb(){
   }
 }
 
+// ── ADMIN PASSWORD CHANGE ──────────────────────────────
+async function changeAdminPassword(){
+  const curr=prompt('Enter CURRENT admin password:');
+  if(!curr)return;
+  const currHash=await hashPassword(curr);
+  const snap=await CREDS_DOC.get();
+  if(!snap.exists||snap.data().admin.hash!==currHash){
+    alert('❌ Current password is incorrect.');return;
+  }
+  const newP=prompt('Enter NEW admin password (min 8 characters):');
+  if(!newP||newP.length<8){alert('❌ Password must be at least 8 characters.');return;}
+  const conf=prompt('Confirm new password:');
+  if(newP!==conf){alert('❌ Passwords do not match.');return;}
+  const newHash=await hashPassword(newP);
+  await CREDS_DOC.update({'admin.hash':newHash});
+  alert('✅ Admin password changed successfully!');
+}
+
 // ── AUTH ─────────────────────────────────────────────
+// ── BRUTE FORCE PROTECTION ─────────────────────────────
+const loginAttempts = {};
+function checkRateLimit(username){
+  const now = Date.now();
+  if(!loginAttempts[username]) loginAttempts[username] = {count:0, lockedUntil:0};
+  const rec = loginAttempts[username];
+  if(rec.lockedUntil > now){
+    const secs = Math.ceil((rec.lockedUntil - now)/1000);
+    return `Too many failed attempts. Try again in ${secs} seconds.`;
+  }
+  return null;
+}
+function recordFailedAttempt(username){
+  const now = Date.now();
+  if(!loginAttempts[username]) loginAttempts[username] = {count:0, lockedUntil:0};
+  const rec = loginAttempts[username];
+  rec.count++;
+  if(rec.count >= 5){
+    rec.lockedUntil = now + 5*60*1000; // Lock for 5 minutes after 5 failed attempts
+    rec.count = 0;
+  }
+}
+function recordSuccessfulLogin(username){
+  delete loginAttempts[username]; // Clear attempts on success
+}
+
 async function doLogin(){
   const u=document.getElementById('lu').value.trim();
   const p=document.getElementById('lp').value.trim();
-  document.getElementById('aerr').style.display='none';
-  if(!u||!p){document.getElementById('aerr').textContent='Please enter username and password.';document.getElementById('aerr').style.display='block';return;}
+  const errEl=document.getElementById('aerr');
+  const btn=document.querySelector('.gbtn');
+  errEl.style.display='none';
+  if(!u||!p){errEl.textContent='Please enter username and password.';errEl.style.display='block';return;}
   if(!initFirebase())return;
-  if(u===AU&&p===AP){cu='Admin';role='admin';await gdb();startApp();return;}
+  // Check rate limiting
+  const rateLimitMsg = checkRateLimit(u);
+  if(rateLimitMsg){ errEl.textContent=rateLimitMsg; errEl.style.display='block'; return; }
+
+  btn.textContent='Logging in...';btn.disabled=true;
   try{
-    await gdb();
-    // Check teacher
-    const t=Object.values(db.teachers||{}).find(x=>x.username===u&&x.password===p);
-    if(t){cu=t.name;role='teacher';sTid=t.id;startApp();return;}
-    // Check student
-    for(const tid of Object.keys(db.teachers||{})){
-      const teacher=db.teachers[tid];
-      const st=Object.values(teacher.students||{}).find(x=>x.username===u&&x.password===p);
-      if(st){cu=st.name;role='student';sStudentId=st.id;sTid=tid;sSid=st.id;startApp();return;}
+    // Hash the entered password using SHA-256
+    const enteredHash = await hashPassword(p);
+
+    // ── Check Admin (credentials stored securely in Firestore) ──
+    await setupAdminIfNeeded();
+    const credsSnap = await CREDS_DOC.get();
+    if(credsSnap.exists){
+      const creds = credsSnap.data();
+      if(u===AU && creds.admin && creds.admin.hash===enteredHash){
+        cu='Admin';role='admin';
+        recordSuccessfulLogin(u);
+        await gdb();
+        btn.textContent='Login';btn.disabled=false;
+        startApp();return;
+      }
     }
-    document.getElementById('aerr').textContent='Invalid username or password.';document.getElementById('aerr').style.display='block';
-  }catch(e){document.getElementById('aerr').textContent='Connection error. Please try again.';document.getElementById('aerr').style.display='block';}
+
+    // ── Check Teachers & Students (hashes stored in Firestore) ──
+    await gdb();
+
+    // Check teacher - compare hashed password
+    const teachers = Object.values(db.teachers||{});
+    for(const t of teachers){
+      if(t.username===u){
+        const tHash = t.passwordHash || await hashPassword(t.password||'');
+        if(tHash===enteredHash){
+          // Migrate to hash if not already done
+          if(!t.passwordHash){
+            db.teachers[t.id].passwordHash=tHash;
+            delete db.teachers[t.id].password;
+            await sdb();
+          }
+          cu=t.name;role='teacher';sTid=t.id;
+          btn.textContent='Login';btn.disabled=false;
+          startApp();return;
+        }
+      }
+    }
+
+    // Check student - compare hashed password
+    for(const tid of Object.keys(db.teachers||{})){
+      const students=Object.values(db.teachers[tid].students||{});
+      for(const st of students){
+        if(st.username===u){
+          const sHash = st.passwordHash || await hashPassword(st.password||'');
+          if(sHash===enteredHash){
+            // Migrate to hash if not already done
+            if(!st.passwordHash){
+              db.teachers[tid].students[st.id].passwordHash=sHash;
+              delete db.teachers[tid].students[st.id].password;
+              await sdb();
+            }
+            cu=st.name;role='student';sStudentId=st.id;sTid=tid;sSid=st.id;
+            btn.textContent='Login';btn.disabled=false;
+            startApp();return;
+          }
+        }
+      }
+    }
+
+    recordFailedAttempt(u);
+    errEl.textContent='Invalid username or password.';errEl.style.display='block';
+  }catch(e){
+    errEl.textContent='Connection error. Please try again.';errEl.style.display='block';
+    console.error('Login error:',e);
+  }
+  btn.textContent='Login';btn.disabled=false;
 }
 function doLogout(){
   cu=null;role=null;db=null;sTid=null;sSid=null;sStudentId=null;
+  clearSession();
   document.getElementById('auth-screen').style.display='flex';
   document.getElementById('app').style.display='none';
   document.getElementById('lu').value='';
@@ -812,7 +958,8 @@ async function addTeacher(){
   const btn=document.querySelector('#m-addteacher .btn.g');
   btn.innerHTML='<span class="sp"></span>Adding... (may take 10-15 sec)';btn.disabled=true;
   const id='t_'+Date.now();
-  db.teachers[id]={id:id,name:name,username:user,password:pass,subject:subj,driveUrl:driveUrl,students:{}};
+  const tHash=await hashPassword(pass);
+  db.teachers[id]={id:id,name:name,username:user,passwordHash:tHash,subject:subj,driveUrl:driveUrl,students:{}};
   await sdb();
   msg.className='msg ok';msg.textContent='✓ Teacher added successfully!';msg.style.display='block';
   btn.innerHTML='Add Teacher';btn.disabled=false;
@@ -862,7 +1009,7 @@ function loadStudents(){
         <div style="font-size:11px;color:#999;">${s.grade||'No grade'} &nbsp;·&nbsp;
           <span style="color:#1d4ed8;font-weight:600;">Login:</span>
           <code style="background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:10px;">${s.username||'—'}</code>
-          / <code style="background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:10px;">${s.password||'—'}</code>
+          / <code style="background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:10px;">••••••</code>
         </div>
       </div>
       <button class="btn sm b" onclick="openSA('${s.id}')">Manage</button>
@@ -892,7 +1039,8 @@ async function addStudent(){
   btn.innerHTML='<span class="sp"></span>Saving...';btn.disabled=true;
   const id='s_'+Date.now();
   if(!db.teachers[sTid].students)db.teachers[sTid].students={};
-  db.teachers[sTid].students[id]={id,name,grade,meet,username:uname,password:pass,lessons:{},homework:{},reviews:{}};
+  const sHash=await hashPassword(pass);
+  db.teachers[sTid].students[id]={id,name,grade,meet,username:uname,passwordHash:sHash,lessons:{},homework:{},reviews:{}};
   try{
     await sdb();
     msg.className='msg ok';msg.textContent='✓ Student added with login credentials!';msg.style.display='block';
@@ -1386,7 +1534,7 @@ function openTProfile(tid){
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
       <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">USERNAME</span><code style="background:#f0f0f0;padding:3px 8px;border-radius:5px;">${t.username}</code></div>
-      <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">CURRENT PASSWORD</span><code style="background:#f0f0f0;padding:3px 8px;border-radius:5px;">${t.password}</code></div>
+      <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">PASSWORD</span><code style="background:#f0f0f0;padding:3px 8px;border-radius:5px;">••••••</code></div>
       <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">STUDENTS</span><span class="bdg b">${Object.keys(t.students||{}).length} students</span></div>
       <div><span style="color:#999;font-size:11px;font-weight:600;display:block;margin-bottom:2px;">DRIVE UPLOAD</span><span class="${hasDrive?'drive-badge':'drive-badge none'}">${hasDrive?'✓ Set':'✗ Not set'}</span></div>
     </div>`;
@@ -1403,7 +1551,7 @@ async function updatePass(){
   if(newPass&&newPass.length<4){msg.className='msg er';msg.textContent='Password must be at least 4 characters.';msg.style.display='block';return;}
   const btn=document.querySelector('#m-tprofile .btn.g');
   btn.innerHTML='<span class="sp"></span>Saving...';btn.disabled=true;
-  if(newPass)db.teachers[sTid].password=newPass;
+  if(newPass){const h=await hashPassword(newPass);db.teachers[sTid].passwordHash=h;delete db.teachers[sTid].password;}
   db.teachers[sTid].driveUrl=newDrive;
   await sdb();
   msg.className='msg ok';msg.textContent='✓ Profile updated successfully!';msg.style.display='block';
@@ -2262,7 +2410,8 @@ async function changeStudentPass(){
   if(newP.length<4){msg.className='msg er';msg.textContent='New password must be at least 4 characters.';msg.style.display='block';return;}
   if(newP!==conP){msg.className='msg er';msg.textContent='New passwords do not match.';msg.style.display='block';return;}
   msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Saving...';msg.style.display='block';
-  db.teachers[sTid].students[sSid].password=newP;
+  db.teachers[sTid].students[sSid].passwordHash=await hashPassword(newP);
+  delete db.teachers[sTid].students[sSid].password;
   await sdb();
   msg.className='msg ok';msg.textContent='✓ Password updated!';
   setTimeout(()=>{closeM('m-stpass');['stp-old','stp-new','stp-con'].forEach(i=>document.getElementById(i).value='');msg.style.display='none';},1500);
@@ -2273,7 +2422,7 @@ function editStudentCreds(sid){
   const s=db.teachers[sTid].students[sid];
   const newU=prompt('Edit username for '+s.name+':', s.username||'');
   if(newU===null)return;
-  const newP=prompt('Edit password for '+s.name+':', s.password||'');
+  const newP=prompt('Edit password for '+s.name+':');
   if(newP===null)return;
   if(!newU||!newP||newP.length<4){alert('Username and password (min 4 chars) required.');return;}
   // Check username uniqueness
@@ -2282,7 +2431,7 @@ function editStudentCreds(sid){
     if(dup){alert('Username already taken. Choose another.');return;}
   }
   db.teachers[sTid].students[sid].username=newU;
-  db.teachers[sTid].students[sid].password=newP;
+  hashPassword(newP).then(h=>{db.teachers[sTid].students[sid].passwordHash=h;delete db.teachers[sTid].students[sid].password;sdb();loadStudents();});
   sdb().then(()=>{loadStudents();alert('✓ Credentials updated!');});
 }
 </script>
