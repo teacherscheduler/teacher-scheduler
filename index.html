@@ -449,6 +449,7 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
       <button class="tb on" onclick="showMT('mt-meet',this)">🎥 Meet Link</button>
       <button class="tb" onclick="showMT('mt-les',this)">📄 Lesson Plans</button>
       <button class="tb" onclick="showMT('mt-hw',this)">📝 Homework</button>
+      <button class="tb" onclick="showMT('mt-rv',this);loadAdmReviews()">📋 Class Reviews</button>
     </div>
     <div id="mt-meet" class="tc on">
       <div class="fg" style="margin-bottom:12px;"><label>Google Meet Link</label><input id="adm-meet" placeholder="https://meet.google.com/..."/></div>
@@ -481,6 +482,9 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
       <button class="btn g" onclick="upHW()" style="width:100%;margin-bottom:12px;">Save</button>
       <div id="hw-msg" style="display:none;margin-bottom:10px;"></div>
       <div id="adm-hw"></div>
+    </div>
+    <div id="mt-rv" class="tc">
+      <div id="adm-rv-list"></div>
     </div>
     <div class="mbtns"><button class="btn" onclick="closeM('m-sadmin')">Close</button></div>
   </div>
@@ -845,6 +849,23 @@ function loadAdmHW(){
 }
 async function delHW(hid){if(!confirm('Delete?'))return;delete db.teachers[sTid].students[sSid].homework[hid];await sdb();loadAdmHW();}
 
+function loadAdmReviews(){
+  const s=db.teachers[sTid].students[sSid];
+  const reviews=Object.values(s.reviews||{}).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const el=document.getElementById('adm-rv-list');
+  if(!reviews.length){el.innerHTML='<div class="nd" style="padding:1.5rem;">No class reviews submitted yet by the teacher.</div>';return;}
+  el.innerHTML=`<div style="font-size:13px;color:#999;margin-bottom:12px;">${reviews.length} review(s) submitted by teacher</div>`+
+  reviews.map(r=>`
+    <div style="border:1.5px solid #eee;border-radius:10px;padding:13px 15px;margin-bottom:10px;background:#fafaf8;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px;">
+        <span style="font-size:14px;font-weight:700;color:#1a1a1a;">📘 ${r.concept}</span>
+        <span class="bdg ${r.understanding==='Excellent'?'g':r.understanding==='Good'?'b':r.understanding==='Needs Practice'?'y':'r'}">${r.understanding}</span>
+        <span style="font-size:11px;color:#bbb;margin-left:auto;">${new Date(r.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</span>
+      </div>
+      ${r.notes?`<div style="font-size:13px;color:#444;line-height:1.6;background:#fff;border-radius:7px;padding:8px 11px;border:1px solid #eee;">${r.notes}</div>`:'<div style="font-size:12px;color:#bbb;font-style:italic;">No notes added.</div>'}
+    </div>`).join('');
+}
+
 // ── TEACHER: MY STUDENTS ──────────────────────────────
 function loadMyStudents(){
   gdb().then(()=>{
@@ -887,8 +908,81 @@ function loadMeetD(){
     el.innerHTML=`<div class="meet-box">🎥 <a href="${s.meet}" target="_blank">${s.meet}</a><button class="btn g sm" onclick="window.open('${s.meet}','_blank')">Join Class</button></div>
     <div style="margin-top:12px;">
       <button class="btn g" style="width:100%;padding:11px;font-size:14px;" onclick="openClassRoom('${sSid}')">🎥 Open Class Room &amp; Record</button>
+    </div>
+    <div style="margin-top:1.5rem;">
+      <div style="font-size:15px;font-weight:700;color:#1a1a1a;margin-bottom:10px;">📋 Post-Class Review</div>
+      <div style="background:#fefce8;border:1.5px solid #fde68a;border-radius:10px;padding:1rem;margin-bottom:12px;">
+        <div style="font-size:12px;color:#854d0e;font-weight:600;margin-bottom:10px;">Add review after class — visible to admin</div>
+        <div class="fr" style="margin-bottom:8px;">
+          <div class="fg"><label>Concept Covered</label><input id="rv-concept" placeholder="e.g. Fractions — Addition"/></div>
+          <div class="fg" style="max-width:160px;"><label>Class Date</label><input type="date" id="rv-date" value="${new Date().toISOString().split('T')[0]}"/></div>
+        </div>
+        <div class="fg" style="margin-bottom:10px;"><label>Student Understanding</label>
+          <select id="rv-understanding" style="width:100%;padding:9px 12px;font-size:13px;border:1.5px solid #e5e5e5;border-radius:9px;color:#1a1a1a;outline:none;background:#fff;">
+            <option value="Excellent">⭐⭐⭐ Excellent — Grasped fully</option>
+            <option value="Good">⭐⭐ Good — Mostly understood</option>
+            <option value="Needs Practice">⭐ Needs Practice — Requires revision</option>
+            <option value="Struggling">⚠️ Struggling — Needs extra attention</option>
+          </select>
+        </div>
+        <div class="fg" style="margin-bottom:10px;"><label>Teacher's Notes / Remarks</label>
+          <textarea id="rv-notes" placeholder="Describe what was covered, student's engagement, areas needing work, next steps..." rows="3" style="width:100%;padding:9px 12px;font-size:13px;border:1.5px solid #e5e5e5;border-radius:9px;color:#1a1a1a;outline:none;background:#fff;resize:vertical;font-family:inherit;"></textarea>
+        </div>
+        <button class="btn g" onclick="saveClassReview()" style="width:100%;">💾 Save Review</button>
+        <div id="rv-msg" style="display:none;margin-top:8px;"></div>
+      </div>
+      <div id="rv-list"></div>
     </div>`;
+    loadReviewList();
   }else{el.innerHTML='<div class="nd">No meet link set yet. Contact your admin.</div>';}
+}
+
+function loadReviewList(){
+  const s=db.teachers[sTid].students[sSid];
+  const reviews=Object.values(s.reviews||{}).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const el=document.getElementById('rv-list');
+  if(!reviews.length){el.innerHTML='<div style="font-size:13px;color:#bbb;text-align:center;padding:1rem;">No reviews yet. Add one after each class.</div>';return;}
+  el.innerHTML=`<div style="font-size:13px;font-weight:700;color:#666;margin-bottom:8px;">Past Reviews (${reviews.length})</div>`+
+  reviews.map(r=>`
+    <div style="border:1.5px solid #eee;border-radius:10px;padding:12px 14px;margin-bottom:8px;background:#fff;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:13px;font-weight:700;color:#1a1a1a;">📘 ${r.concept}</span>
+        <span class="bdg ${r.understanding==='Excellent'?'g':r.understanding==='Good'?'b':r.understanding==='Needs Practice'?'y':'r'}">${r.understanding}</span>
+        <span style="font-size:11px;color:#bbb;margin-left:auto;">${new Date(r.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</span>
+        <button class="btn sm r" onclick="deleteReview('${r.id}')">✕</button>
+      </div>
+      ${r.notes?`<div style="font-size:12px;color:#555;line-height:1.6;background:#f9f9f6;border-radius:7px;padding:7px 10px;">${r.notes}</div>`:''}
+    </div>`).join('');
+}
+
+async function saveClassReview(){
+  const concept=document.getElementById('rv-concept').value.trim();
+  const date=document.getElementById('rv-date').value;
+  const understanding=document.getElementById('rv-understanding').value;
+  const notes=document.getElementById('rv-notes').value.trim();
+  const msg=document.getElementById('rv-msg');
+  if(!concept||!date){msg.className='msg er';msg.textContent='Please enter concept and date.';msg.style.display='block';return;}
+  msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Saving...';msg.style.display='block';
+  const id='rv_'+Date.now();
+  const s=db.teachers[sTid].students[sSid];
+  if(!s.reviews)s.reviews={};
+  s.reviews[id]={id,concept,date,understanding,notes,at:new Date().toISOString()};
+  try{
+    await sdb();
+    msg.className='msg ok';msg.textContent='✓ Review saved!';
+    document.getElementById('rv-concept').value='';
+    document.getElementById('rv-notes').value='';
+    document.getElementById('rv-date').value=new Date().toISOString().split('T')[0];
+    loadReviewList();
+    setTimeout(()=>msg.style.display='none',2000);
+  }catch(e){msg.className='msg er';msg.textContent='Save failed. Please try again.';msg.style.display='block';}
+}
+
+async function deleteReview(rid){
+  if(!confirm('Delete this review?'))return;
+  delete db.teachers[sTid].students[sSid].reviews[rid];
+  await sdb();
+  loadReviewList();
 }
 
 function loadLesD(){
