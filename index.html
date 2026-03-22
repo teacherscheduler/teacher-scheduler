@@ -174,6 +174,9 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
 .drive-badge{display:inline-flex;align-items:center;gap:5px;background:#edfaf1;color:#1a7a3a;border:1px solid #a9dfbf;border-radius:8px;padding:3px 10px;font-size:11px;font-weight:700;}
 .drive-badge.none{background:#fff5f5;color:#c0392b;border-color:#fcc;}
 </style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div class="bg"></div>
@@ -372,6 +375,36 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
         </div>
       </div>
 
+      <!-- STUDENT PORTAL PAGES -->
+      <!-- Student Dashboard -->
+      <div class="pg" id="pg-student-dash">
+        <div class="card">
+          <div class="ctop"><div><div class="ctitle" id="st-dash-name">My Dashboard</div><div class="csub" id="st-dash-grade"></div></div></div>
+          <div class="sg" id="st-dash-stats"></div>
+        </div>
+      </div>
+      <!-- Student Class Reviews -->
+      <div class="pg" id="pg-student-reviews">
+        <div class="card">
+          <div class="ctop"><div class="ctitle">📋 My Class Reviews</div></div>
+          <div id="st-reviews-list"></div>
+        </div>
+      </div>
+      <!-- Student Homework -->
+      <div class="pg" id="pg-student-hw">
+        <div class="card">
+          <div class="ctop"><div class="ctitle">📝 My Homework</div></div>
+          <div id="st-hw-list"></div>
+        </div>
+      </div>
+      <!-- Student Meet Link -->
+      <div class="pg" id="pg-student-meet">
+        <div class="card">
+          <div class="ctop"><div class="ctitle">🎥 My Class Link</div></div>
+          <div id="st-meet-info"></div>
+        </div>
+      </div>
+
       <!-- MY ATTENDANCE (teacher) -->
       <div class="pg" id="pg-ma">
         <div class="card">
@@ -414,6 +447,13 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
     <div class="fr"><div class="fg"><label>Student Name *</label><input id="ns-n" placeholder="e.g. Riya Sharma"/></div></div>
     <div class="fr"><div class="fg"><label>Grade / Class</label><input id="ns-g" placeholder="e.g. Grade 8"/></div></div>
     <div class="fr"><div class="fg"><label>Google Meet Link</label><input id="ns-m" placeholder="https://meet.google.com/..."/></div></div>
+    <div style="background:#fefce8;border:1.5px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:700;color:#854d0e;margin-bottom:8px;">🔐 Student Portal Login Credentials</div>
+      <div class="fr" style="margin-bottom:0;">
+        <div class="fg"><label>Username *</label><input id="ns-u" placeholder="e.g. riya123"/></div>
+        <div class="fg"><label>Password *</label><input id="ns-p" placeholder="e.g. math2024"/></div>
+      </div>
+    </div>
     <div id="as-msg" style="display:none;"></div>
     <div class="mbtns">
       <button class="btn" onclick="closeM('m-addstudent')">Cancel</button>
@@ -479,6 +519,11 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
       <div class="fg" style="margin-bottom:6px;"><label>Option 1: Upload PDF (max 500KB)</label><input type="file" id="hpdf" accept=".pdf"/></div>
       <div class="fg" style="margin-bottom:10px;"><label>Option 2: Paste Google Drive / PDF Link</label><input id="hlink" placeholder="https://drive.google.com/file/d/..."/></div>
       <div style="font-size:11px;color:#999;margin-bottom:10px;">💡 For large PDFs: Upload to Google Drive → Share → Anyone with link → paste link above</div>
+      <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+        <div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:6px;">✨ Option 3: Live HTML Worksheet (auto-graded)</div>
+        <div style="font-size:11px;color:#555;margin-bottom:8px;">Paste or type HTML questions below. Use <code style="background:#e5e7eb;padding:1px 4px;border-radius:3px;">&lt;input data-answer="correct"&gt;</code> for text answers, <code style="background:#e5e7eb;padding:1px 4px;border-radius:3px;">&lt;input type="radio" data-answer="correct" name="q1"&gt;</code> for MCQ. Student submits and teacher sees correct/wrong.</div>
+        <textarea id="hw-worksheet" rows="5" placeholder='e.g. &lt;p&gt;1. What is 2+2? &lt;input data-answer="4" placeholder="Your answer"&gt;&lt;/p&gt;&#10;&lt;p&gt;2. Capital of India? &lt;input data-answer="Delhi" placeholder="Your answer"&gt;&lt;/p&gt;' style="width:100%;padding:9px 12px;font-size:12px;border:1.5px solid #e5e5e5;border-radius:9px;color:#1a1a1a;outline:none;background:#fff;resize:vertical;font-family:monospace;"></textarea>
+      </div>
       <button class="btn g" onclick="upHW()" style="width:100%;margin-bottom:12px;">Save</button>
       <div id="hw-msg" style="display:none;margin-bottom:10px;"></div>
       <div id="adm-hw"></div>
@@ -487,6 +532,43 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
       <div id="adm-rv-list"></div>
     </div>
     <div class="mbtns"><button class="btn" onclick="closeM('m-sadmin')">Close</button></div>
+  </div>
+</div>
+
+<!-- Student: Live Homework Worksheet Modal -->
+<div class="mov" id="m-worksheet" style="display:none;">
+  <div class="mbox" style="max-width:620px;">
+    <h3 id="ws-title">📝 Homework</h3>
+    <div id="ws-content"></div>
+    <div id="ws-result" style="display:none;margin-top:1rem;"></div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeM('m-worksheet')">Close</button>
+      <button class="btn g" id="ws-submit-btn" onclick="submitWorksheet()">✅ Submit Answers</button>
+    </div>
+  </div>
+</div>
+
+<!-- Student: Change Password Modal -->
+<div class="mov" id="m-stpass" style="display:none;">
+  <div class="mbox" style="max-width:360px;">
+    <h3>🔑 Change My Password</h3>
+    <div class="fg" style="margin-bottom:12px;"><label>Current Password</label><input type="password" id="stp-old" placeholder="Enter current password"/></div>
+    <div class="fg" style="margin-bottom:12px;"><label>New Password</label><input type="password" id="stp-new" placeholder="Min 4 characters"/></div>
+    <div class="fg" style="margin-bottom:12px;"><label>Confirm New Password</label><input type="password" id="stp-con" placeholder="Repeat new password"/></div>
+    <div id="stp-msg" style="display:none;margin-bottom:10px;"></div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeM('m-stpass')">Cancel</button>
+      <button class="btn g" onclick="changeStudentPass()">Update Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin/Teacher: Worksheet Responses Viewer -->
+<div class="mov" id="m-ws-responses" style="display:none;">
+  <div class="mbox" style="max-width:640px;">
+    <h3 id="wsr-title">📊 Homework Results</h3>
+    <div id="wsr-content"></div>
+    <div class="mbtns"><button class="btn" onclick="closeM('m-ws-responses')">Close</button></div>
   </div>
 </div>
 
@@ -503,24 +585,67 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
 </div>
 
 </div><script>
-const BIN='69bd62ebaa77b81da901dd38';
-const MK='$2a$10$HUKcJaif43cfUxh/.4eh6eOxTenNonDa9njlkvX5qsrm/R9jq32Cu';
-const API='https://api.jsonbin.io/v3/b/'+BIN;
+// ═══════════════════════════════════════════════════
+// 🔥 FIREBASE CONFIGURATION
+// Replace these values with your own Firebase project config
+// Get them from: console.firebase.google.com → Your Project → Project Settings → Your Apps
+// ═══════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId:         "YOUR_PROJECT_ID",
+  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId:             "YOUR_APP_ID"
+};
+
+// Firebase safety init
+let fsdb = null, PORTAL_DOC = null;
+function initFirebase(){
+  try{
+    if(typeof firebase === 'undefined'){
+      document.getElementById('aerr').textContent = '⚠ Firebase failed to load. Please check your internet connection and open this file in a browser (not a preview).';
+      document.getElementById('aerr').style.display = 'block';
+      return false;
+    }
+    if(!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    fsdb = firebase.firestore();
+    PORTAL_DOC = fsdb.collection('mathkari').doc('portalData');
+    return true;
+  }catch(e){
+    document.getElementById('aerr').textContent = '⚠ Firebase error: '+e.message+'. Make sure you replaced YOUR_API_KEY etc. with your real Firebase config.';
+    document.getElementById('aerr').style.display = 'block';
+    return false;
+  }
+}
+
 const AU='admin', AP='mathkari@123';
 let cu=null,role=null,db=null,sTid=null,sSid=null,wkOff=0,sg={},pBusy=null;
+let sStudentId=null;
+let wsCurrentHwId=null,wsCurrentTid=null,wsCurSid=null;
 
-// ── DB ──────────────────────────────────────────────
+// ── DB — Firebase Firestore ───────────────────────────
 async function gdb(){
-  const r=await fetch(API+'/latest',{headers:{'X-Master-Key':MK}});
-  const j=await r.json();
-  db=j.record||{};
+  if(!PORTAL_DOC&&!initFirebase()){db={teachers:{},schedules:{},attendance:{}};return db;}
+  try{
+    const snap=await PORTAL_DOC.get();
+    db=snap.exists?snap.data():{};
+  }catch(e){
+    console.error('Firestore read error:',e);
+    db={};
+  }
   if(!db.teachers)db.teachers={};
   if(!db.schedules)db.schedules={};
   if(!db.attendance)db.attendance={};
   return db;
 }
 async function sdb(){
-  await fetch(API,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':MK},body:JSON.stringify(db)});
+  try{
+    await PORTAL_DOC.set(db);
+  }catch(e){
+    console.error('Firestore write error:',e);
+    alert('Error saving data. Please check your Firebase configuration.');
+  }
 }
 
 // ── AUTH ─────────────────────────────────────────────
@@ -529,16 +654,24 @@ async function doLogin(){
   const p=document.getElementById('lp').value.trim();
   document.getElementById('aerr').style.display='none';
   if(!u||!p){document.getElementById('aerr').textContent='Please enter username and password.';document.getElementById('aerr').style.display='block';return;}
+  if(!initFirebase())return;
   if(u===AU&&p===AP){cu='Admin';role='admin';await gdb();startApp();return;}
   try{
     await gdb();
+    // Check teacher
     const t=Object.values(db.teachers||{}).find(x=>x.username===u&&x.password===p);
-    if(t){cu=t.name;role='teacher';sTid=t.id;startApp();}
-    else{document.getElementById('aerr').textContent='Invalid username or password.';document.getElementById('aerr').style.display='block';}
+    if(t){cu=t.name;role='teacher';sTid=t.id;startApp();return;}
+    // Check student
+    for(const tid of Object.keys(db.teachers||{})){
+      const teacher=db.teachers[tid];
+      const st=Object.values(teacher.students||{}).find(x=>x.username===u&&x.password===p);
+      if(st){cu=st.name;role='student';sStudentId=st.id;sTid=tid;sSid=st.id;startApp();return;}
+    }
+    document.getElementById('aerr').textContent='Invalid username or password.';document.getElementById('aerr').style.display='block';
   }catch(e){document.getElementById('aerr').textContent='Connection error. Please try again.';document.getElementById('aerr').style.display='block';}
 }
 function doLogout(){
-  cu=null;role=null;db=null;sTid=null;sSid=null;
+  cu=null;role=null;db=null;sTid=null;sSid=null;sStudentId=null;
   document.getElementById('auth-screen').style.display='flex';
   document.getElementById('app').style.display='none';
   document.getElementById('lu').value='';
@@ -550,7 +683,8 @@ function startApp(){
   document.getElementById('nav-user').textContent=cu+' · '+role;
   buildSB();initSelects();
   if(role==='admin'){showPg('pg-dash');loadDash();}
-  else{showPg('pg-ms');loadMyStudents();}
+  else if(role==='teacher'){showPg('pg-ms');loadMyStudents();}
+  else if(role==='student'){showPg('pg-student-dash');loadStudentDash();}
 }
 
 // ── SIDEBAR ───────────────────────────────────────────
@@ -560,13 +694,21 @@ function buildSB(){
     sb.innerHTML=`<div class="ng">Admin Panel</div>
     <div class="nl on" onclick="navTo('pg-dash',this);loadDash()"><span style="margin-right:6px;">🏠</span>Dashboard</div>
     <div class="nl" onclick="navTo('pg-teachers',this);loadTeachers()"><span style="margin-right:6px;">👩‍🏫</span>Teachers</div>`;
-  }else{
+  }else if(role==='teacher'){
     sb.innerHTML=`<div class="ng">Teacher Panel</div>
     <div class="nl on" onclick="navTo('pg-ms',this);loadMyStudents()"><span style="margin-right:6px;">👨‍🎓</span>My Students</div>
     <div class="nl" onclick="navTo('pg-sc',this);initSc()"><span style="margin-right:6px;">📅</span>Availability</div>
     <div class="nl" onclick="navTo('pg-ma',this);loadMyAtt()"><span style="margin-right:6px;">✅</span>Attendance</div>
     <div style="padding:12px 20px 0;"><div style="height:1px;background:rgba(212,160,23,0.18);margin-bottom:10px;"></div></div>
     <div class="nl-class" onclick="if(sSid){openClassRoom(sSid);}else{alert('Open a student first, then tap Class Room.');}"><span style="margin-right:6px;">🎥</span>Class Room</div>`;
+  }else if(role==='student'){
+    sb.innerHTML=`<div class="ng">Student Portal</div>
+    <div class="nl on" onclick="navTo('pg-student-dash',this);loadStudentDash()"><span style="margin-right:6px;">🏠</span>Dashboard</div>
+    <div class="nl" onclick="navTo('pg-student-reviews',this);loadStudentReviews()"><span style="margin-right:6px;">📋</span>Class Reviews</div>
+    <div class="nl" onclick="navTo('pg-student-hw',this);loadStudentHW()"><span style="margin-right:6px;">📝</span>My Homework</div>
+    <div class="nl" onclick="navTo('pg-student-meet',this);loadStudentMeet()"><span style="margin-right:6px;">🎥</span>Join Class</div>
+    <div style="padding:12px 20px 0;"><div style="height:1px;background:rgba(212,160,23,0.18);margin-bottom:10px;"></div></div>
+    <div class="nl" onclick="openM('m-stpass')" style="color:#aaa;font-size:12px;"><span style="margin-right:6px;">🔑</span>Change Password</div>`;
   }
 }
 function navTo(pid,el){
@@ -710,9 +852,14 @@ function loadStudents(){
       <div class="sav">${s.name.charAt(0).toUpperCase()}</div>
       <div style="flex:1;">
         <div style="font-size:13px;font-weight:600;">${s.name}</div>
-        <div style="font-size:11px;color:#999;">${s.grade||'No grade specified'}</div>
+        <div style="font-size:11px;color:#999;">${s.grade||'No grade'} &nbsp;·&nbsp;
+          <span style="color:#1d4ed8;font-weight:600;">Login:</span>
+          <code style="background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:10px;">${s.username||'—'}</code>
+          / <code style="background:#f0f0f0;padding:1px 5px;border-radius:4px;font-size:10px;">${s.password||'—'}</code>
+        </div>
       </div>
       <button class="btn sm b" onclick="openSA('${s.id}')">Manage</button>
+      <button class="btn sm" onclick="editStudentCreds('${s.id}')" style="background:#fefce8;border-color:#fde68a;color:#854d0e;">🔑 Creds</button>
       <button class="btn sm r" onclick="delS('${s.id}')">✕</button>
     </div>`).join('');
 }
@@ -721,23 +868,33 @@ async function addStudent(){
   const name=document.getElementById('ns-n').value.trim();
   const grade=document.getElementById('ns-g').value.trim();
   const meet=document.getElementById('ns-m').value.trim();
+  const uname=document.getElementById('ns-u').value.trim();
+  const pass=document.getElementById('ns-p').value.trim();
   const msg=document.getElementById('as-msg');
   const btn=document.getElementById('as-btn');
   if(!name){msg.className='msg er';msg.textContent='Please enter student name.';msg.style.display='block';return;}
-  if(!sTid||!db.teachers[sTid]){msg.className='msg er';msg.textContent='Error: No teacher selected. Please go back and click Manage on a teacher first.';msg.style.display='block';return;}
+  if(!uname||!pass){msg.className='msg er';msg.textContent='Please enter username and password for student login.';msg.style.display='block';return;}
+  if(pass.length<4){msg.className='msg er';msg.textContent='Password must be at least 4 characters.';msg.style.display='block';return;}
+  if(!sTid||!db.teachers[sTid]){msg.className='msg er';msg.textContent='Error: No teacher selected.';msg.style.display='block';return;}
+  // Check username uniqueness across all students
+  for(const tid of Object.keys(db.teachers)){
+    if(Object.values(db.teachers[tid].students||{}).find(s=>s.username===uname)){
+      msg.className='msg er';msg.textContent='This username is already taken. Choose another.';msg.style.display='block';return;
+    }
+  }
   btn.innerHTML='<span class="sp"></span>Saving...';btn.disabled=true;
   const id='s_'+Date.now();
   if(!db.teachers[sTid].students)db.teachers[sTid].students={};
-  db.teachers[sTid].students[id]={id:id,name:name,grade:grade,meet:meet,lessons:{},homework:{}};
+  db.teachers[sTid].students[id]={id,name,grade,meet,username:uname,password:pass,lessons:{},homework:{},reviews:{}};
   try{
     await sdb();
-    msg.className='msg ok';msg.textContent='✓ Student added successfully!';msg.style.display='block';
+    msg.className='msg ok';msg.textContent='✓ Student added with login credentials!';msg.style.display='block';
     btn.innerHTML='Add Student';btn.disabled=false;
     setTimeout(()=>{
       closeM('m-addstudent');loadStudents();
-      ['ns-n','ns-g','ns-m'].forEach(i=>document.getElementById(i).value='');
+      ['ns-n','ns-g','ns-m','ns-u','ns-p'].forEach(i=>document.getElementById(i).value='');
       msg.style.display='none';
-    },1200);
+    },1400);
   }catch(e){
     msg.className='msg er';msg.textContent='Error saving. Please try again.';msg.style.display='block';
     btn.innerHTML='Add Student';btn.disabled=false;
@@ -818,36 +975,88 @@ async function upHW(){
   const cls=document.getElementById('hc').value.trim();
   const type=document.getElementById('htype').value;
   const file=document.getElementById('hpdf').files[0];
+  const link=document.getElementById('hlink').value.trim();
+  const wsHtml=document.getElementById('hw-worksheet').value.trim();
   const msg=document.getElementById('hw-msg');
-  if(!title||!file){msg.className='msg er';msg.textContent='Please enter title and select a PDF file.';msg.style.display='block';return;}
-  if(file.size>500*1024){msg.className='msg er';msg.textContent='File too large. Maximum size is 500KB due to free storage limits. Please compress your PDF first.';msg.style.display='block';return;}
-  msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Uploading...';msg.style.display='block';
-  const data=await b64(file);
+  if(!title){msg.className='msg er';msg.textContent='Please enter a title.';msg.style.display='block';return;}
+  if(!file&&!link&&!wsHtml){msg.className='msg er';msg.textContent='Please upload a PDF, paste a link, or enter worksheet HTML.';msg.style.display='block';return;}
+  if(file&&file.size>500*1024){msg.className='msg er';msg.textContent='File too large (max 500KB). Use Drive link or worksheet instead.';msg.style.display='block';return;}
+  msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Saving...';msg.style.display='block';
   const id='h_'+Date.now();
   const s=db.teachers[sTid].students[sSid];
   if(!s.homework)s.homework={};
-  s.homework[id]={id,title,cls,type,data,at:new Date().toISOString()};
+  let data=null,fileLink=null,worksheet=null;
+  if(file)data=await b64(file);
+  if(link)fileLink=link;
+  if(wsHtml)worksheet=wsHtml;
+  s.homework[id]={id,title,cls,type,data,fileLink,worksheet,at:new Date().toISOString(),submission:null};
   try{
     await sdb();
-    msg.className='msg ok';msg.textContent='✓ Uploaded!';
-    ['ht','hc'].forEach(i=>document.getElementById(i).value='');
+    msg.className='msg ok';msg.textContent='✓ Homework saved!';
+    ['ht','hc','hlink','hw-worksheet'].forEach(i=>document.getElementById(i).value='');
     document.getElementById('hpdf').value='';
+    document.getElementById('htype').value='Homework';
     loadAdmHW();setTimeout(()=>msg.style.display='none',2000);
   }catch(e){
-    msg.className='msg er';msg.textContent='Save failed. PDF may be too large. Try a smaller PDF.';
-    msg.style.display='block';
+    msg.className='msg er';msg.textContent='Save failed. Try a Drive link or worksheet instead of PDF.';msg.style.display='block';
   }
 }
 
 function loadAdmHW(){
   const s=db.teachers[sTid].students[sSid];
-  const hs=Object.values(s.homework||{});
+  const hs=Object.values(s.homework||{}).sort((a,b)=>new Date(b.at)-new Date(a.at));
   const el=document.getElementById('adm-hw');
   if(!hs.length){el.innerHTML='<div class="nd" style="padding:1rem;">No homework yet.</div>';return;}
-  el.innerHTML=`<table class="tbl"><thead><tr><th>Title</th><th>Class</th><th>Type</th><th>File</th><th>Date</th><th></th></tr></thead><tbody>`+
-  hs.map(h=>`<tr><td>${h.title}</td><td>${h.cls||'—'}</td><td><span class="bdg ${h.type==='Homework'?'y':'b'}">${h.type}</span></td><td>${h.fileLink?'<span class="bdg b">Link</span>':'<span class="bdg g">PDF</span>'}</td><td>${new Date(h.at).toLocaleDateString('en-IN')}</td><td><button class="btn sm r" onclick="delHW('${h.id}')">Delete</button></td></tr>`).join('')+'</tbody></table>';
+  el.innerHTML=hs.map(h=>{
+    const sub=h.submission;
+    const subBadge=sub
+      ?`<span class="bdg g" style="cursor:pointer;" onclick="viewHWResponses('${h.id}')">✅ Done — View Results</span>`
+      :`<span class="bdg y">⏳ Pending</span>`;
+    const hwType=h.worksheet?'<span class="bdg g">Worksheet</span>':h.fileLink?'<span class="bdg b">Link</span>':h.data?'<span class="bdg g">PDF</span>':'<span style="color:#bbb;">—</span>';
+    return `<div style="border:1.5px solid #eee;border-radius:10px;padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:600;">${h.title}</div>
+        <div style="font-size:11px;color:#999;margin-top:2px;">
+          <span class="bdg ${h.type==='Homework'?'y':'b'}">${h.type}</span>
+          ${h.cls?` · Class ${h.cls}`:''}
+          · ${new Date(h.at).toLocaleDateString('en-IN')}
+          · ${hwType}
+        </div>
+        <div style="margin-top:6px;">${subBadge}</div>
+      </div>
+      <button class="btn sm r" onclick="delHW('${h.id}')">Delete</button>
+    </div>`;
+  }).join('');
 }
 async function delHW(hid){if(!confirm('Delete?'))return;delete db.teachers[sTid].students[sSid].homework[hid];await sdb();loadAdmHW();}
+
+function viewHWResponses(hid){
+  const s=db.teachers[sTid].students[sSid];
+  const h=s.homework[hid];
+  if(!h||!h.submission){alert('No submission found.');return;}
+  const sub=h.submission;
+  document.getElementById('wsr-title').textContent=`📊 Results: ${h.title} — ${s.name}`;
+  const score=sub.score,total=sub.total;
+  const pct=total>0?Math.round(score/total*100):0;
+  const color=pct>=80?'#1a7a3a':pct>=50?'#854d0e':'#c0392b';
+  let html=`<div style="background:#f9f9f6;border-radius:10px;padding:1rem;margin-bottom:1rem;text-align:center;">
+    <div style="font-size:28px;font-weight:800;color:${color};">${score}/${total}</div>
+    <div style="font-size:14px;color:#666;margin-top:4px;">${pct}% correct · Submitted ${new Date(sub.at).toLocaleString('en-IN')}</div>
+  </div>`;
+  if(sub.answers&&sub.answers.length){
+    html+=`<div style="font-size:13px;font-weight:700;color:#555;margin-bottom:8px;">Question-by-Question</div>`;
+    sub.answers.forEach((a,i)=>{
+      const ok=a.correct;
+      html+=`<div style="border:1.5px solid ${ok?'#a9dfbf':'#fcc'};background:${ok?'#edfaf1':'#fff5f5'};border-radius:9px;padding:9px 13px;margin-bottom:7px;">
+        <div style="font-size:12px;font-weight:700;color:${ok?'#1a7a3a':'#c0392b'};">${ok?'✅ Correct':'❌ Wrong'} — Q${i+1}</div>
+        <div style="font-size:12px;color:#444;margin-top:3px;">Student answered: <strong>${a.given||'(blank)'}</strong></div>
+        ${!ok?`<div style="font-size:12px;color:#1a7a3a;margin-top:2px;">Correct answer: <strong>${a.expected}</strong></div>`:''}
+      </div>`;
+    });
+  }
+  document.getElementById('wsr-content').innerHTML=html;
+  openM('m-ws-responses');
+}
 
 function loadAdmReviews(){
   const s=db.teachers[sTid].students[sSid];
@@ -1009,13 +1218,110 @@ function loadHWD(){
   const hs=Object.values(s.homework||{}).sort((a,b)=>new Date(b.at)-new Date(a.at));
   const el=document.getElementById('hw-d');
   if(!hs.length){el.innerHTML='<div class="nd">No homework/classwork uploaded yet.</div>';return;}
-  el.innerHTML=hs.map(h=>`
-    <div style="border:1.5px solid #eee;border-radius:10px;padding:11px 14px;margin-bottom:9px;display:flex;align-items:center;gap:12px;">
-      <span style="font-size:22px;">📝</span>
-      <div style="flex:1;"><div style="font-size:13px;font-weight:600;">${h.title}</div>
-      <div style="font-size:11px;color:#999;"><span class="bdg ${h.type==='Homework'?'y':'b'}">${h.type}</span> · Class ${h.cls||'—'} · ${new Date(h.at).toLocaleDateString('en-IN')}</div></div>
-      <button class="btn sm b" onclick="viewPDF('${h.id}','h')">View</button>
-    </div>`).join('');
+  el.innerHTML=hs.map(h=>{
+    const sub=h.submission;
+    const statusBadge=sub
+      ?`<span class="bdg g" style="cursor:pointer;" onclick="viewTeacherHWResult('${h.id}')">✅ Submitted — View Results</span>`
+      :`<span class="bdg y">⏳ Not submitted yet</span>`;
+    const hasWorksheet=!!h.worksheet;
+    return `<div style="border:1.5px solid #eee;border-radius:10px;padding:11px 14px;margin-bottom:9px;">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <span style="font-size:22px;">${hasWorksheet?'✏️':'📝'}</span>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:600;">${h.title}</div>
+          <div style="font-size:11px;color:#999;margin-top:2px;">
+            <span class="bdg ${h.type==='Homework'?'y':'b'}">${h.type}</span>
+            ${h.cls?` · Class ${h.cls}`:''}
+            · ${new Date(h.at).toLocaleDateString('en-IN')}
+            ${hasWorksheet?'· <span class="bdg g" style="font-size:10px;">Worksheet</span>':''}
+          </div>
+          <div style="margin-top:6px;">${statusBadge}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${hasWorksheet?`<button class="btn sm b" onclick="previewWorksheetForTeacher('${h.id}')">👁 Preview Questions</button>`:''}
+          ${!hasWorksheet&&(h.data||h.fileLink)?`<button class="btn sm b" onclick="viewPDF('${h.id}','h')">View</button>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function previewWorksheetForTeacher(hid){
+  const s=db.teachers[sTid].students[sSid];
+  const h=s.homework[hid];
+  if(!h||!h.worksheet){alert('Worksheet not found.');return;}
+
+  // Parse worksheet HTML to extract questions and correct answers
+  const parser=new DOMParser();
+  const doc=parser.parseFromString(h.worksheet,'text/html');
+  const inputs=doc.querySelectorAll('input[data-answer]');
+
+  // Build answer key table
+  let answerKeyHtml='';
+  if(inputs.length){
+    answerKeyHtml=`<div style="background:#fefce8;border:1.5px solid #fde68a;border-radius:10px;padding:1rem;margin-top:1.2rem;">
+      <div style="font-size:13px;font-weight:700;color:#854d0e;margin-bottom:10px;">🔑 Answer Key (${inputs.length} questions)</div>
+      <table class="tbl">
+        <thead><tr><th>#</th><th>Correct Answer</th><th>Type</th></tr></thead>
+        <tbody>`;
+    inputs.forEach((inp,i)=>{
+      const ans=inp.getAttribute('data-answer');
+      const type=inp.type==='radio'?'<span class="bdg b">MCQ</span>':'<span class="bdg g">Text</span>';
+      answerKeyHtml+=`<tr>
+        <td style="font-weight:700;">Q${i+1}</td>
+        <td><strong style="color:#1a7a3a;">${ans==='correct'?'(selected option)':ans}</strong></td>
+        <td>${type}</td>
+      </tr>`;
+    });
+    answerKeyHtml+=`</tbody></table></div>`;
+  }
+
+  document.getElementById('wsr-title').textContent=`👁 Preview: ${h.title}`;
+  document.getElementById('wsr-content').innerHTML=`
+    <div style="font-size:12px;color:#999;margin-bottom:12px;">
+      This is exactly what the student sees. Inputs are read-only in this preview.
+    </div>
+    <div style="border:1.5px solid #e5e5e5;border-radius:10px;padding:1.2rem;background:#fafaf8;">
+      ${h.worksheet}
+    </div>
+    ${answerKeyHtml}`;
+
+  // Make all inputs read-only in preview
+  document.querySelectorAll('#wsr-content input').forEach(inp=>{
+    inp.setAttribute('disabled','disabled');
+    inp.style.cssText='border:1.5px solid #d4a017;border-radius:7px;padding:6px 10px;font-size:13px;min-width:120px;background:#f9f9f6;cursor:not-allowed;';
+  });
+
+  openM('m-ws-responses');
+}
+
+function viewTeacherHWResult(hid){
+  // Teacher viewing student submission from teacher's own student view
+  const s=db.teachers[sTid].students[sSid];
+  const h=s.homework[hid];
+  if(!h||!h.submission){alert('No submission yet.');return;}
+  const sub=h.submission;
+  document.getElementById('wsr-title').textContent=`📊 Results: ${h.title} — ${s.name}`;
+  const score=sub.score,total=sub.total;
+  const pct=total>0?Math.round(score/total*100):0;
+  const color=pct>=80?'#1a7a3a':pct>=50?'#854d0e':'#c0392b';
+  let html=`<div style="background:#f9f9f6;border-radius:10px;padding:1rem;margin-bottom:1rem;text-align:center;">
+    <div style="font-size:28px;font-weight:800;color:${color};">${score}/${total}</div>
+    <div style="font-size:14px;color:#666;margin-top:4px;">${pct}% correct · Submitted ${new Date(sub.at).toLocaleString('en-IN')}</div>
+  </div>`;
+  if(sub.answers&&sub.answers.length){
+    html+=`<div style="font-size:13px;font-weight:700;color:#555;margin-bottom:8px;">Question-by-Question</div>`;
+    sub.answers.forEach((a,i)=>{
+      const ok=a.correct;
+      html+=`<div style="border:1.5px solid ${ok?'#a9dfbf':'#fcc'};background:${ok?'#edfaf1':'#fff5f5'};border-radius:9px;padding:9px 13px;margin-bottom:7px;">
+        <div style="font-size:12px;font-weight:700;color:${ok?'#1a7a3a':'#c0392b'};">${ok?'✅':'❌'} Q${i+1}</div>
+        <div style="font-size:12px;color:#444;margin-top:3px;">Answered: <strong>${a.given||'(blank)'}</strong></div>
+        ${!ok?`<div style="font-size:12px;color:#1a7a3a;">Correct: <strong>${a.expected}</strong></div>`:''}
+      </div>`;
+    });
+  }
+  document.getElementById('wsr-content').innerHTML=html;
+  openM('m-ws-responses');
 }
 
 function viewPDF(id,type){
@@ -1720,6 +2026,257 @@ async function loadMyAtt(){
       await sdb();
     });
   });
+}
+
+// ── STUDENT PORTAL ────────────────────────────────────
+function getMyStudentObj(){
+  if(!sTid||!sSid)return null;
+  return db.teachers[sTid]&&db.teachers[sTid].students&&db.teachers[sTid].students[sSid]||null;
+}
+
+function loadStudentDash(){
+  gdb().then(()=>{
+    const s=getMyStudentObj();
+    if(!s)return;
+    document.getElementById('st-dash-name').textContent='👋 Welcome, '+s.name+'!';
+    document.getElementById('st-dash-grade').textContent=s.grade||'';
+    const hwCount=Object.keys(s.homework||{}).length;
+    const doneCount=Object.values(s.homework||{}).filter(h=>h.submission).length;
+    const revCount=Object.keys(s.reviews||{}).length;
+    const teacher=db.teachers[sTid];
+    document.getElementById('st-dash-stats').innerHTML=`
+      <div class="st" style="background:#fef9c3;cursor:pointer;" onclick="navTo('pg-student-hw',document.querySelector('.nl[onclick*=student-hw]'));loadStudentHW()">
+        <div class="sn" style="color:#854d0e;">${hwCount}</div><div class="sl" style="color:#92400e;">Homework Assigned</div>
+      </div>
+      <div class="st" style="background:#edfaf1;cursor:pointer;" onclick="navTo('pg-student-hw',document.querySelector('.nl[onclick*=student-hw]'));loadStudentHW()">
+        <div class="sn" style="color:#1a7a3a;">${doneCount}</div><div class="sl" style="color:#166534;">Submitted</div>
+      </div>
+      <div class="st" style="background:#eff6ff;cursor:pointer;" onclick="navTo('pg-student-reviews',document.querySelector('.nl[onclick*=student-reviews]'));loadStudentReviews()">
+        <div class="sn" style="color:#1d4ed8;">${revCount}</div><div class="sl" style="color:#1e40af;">Class Reviews</div>
+      </div>
+      <div class="st" style="background:#f0fdf4;">
+        <div style="font-size:14px;font-weight:700;color:#166534;margin-bottom:4px;">👩‍🏫 My Teacher</div>
+        <div style="font-size:13px;color:#166534;">${teacher?teacher.name:'—'}</div>
+      </div>`;
+  });
+}
+
+function loadStudentReviews(){
+  gdb().then(()=>{
+    const s=getMyStudentObj();
+    if(!s){document.getElementById('st-reviews-list').innerHTML='<div class="nd">Could not load data.</div>';return;}
+    const reviews=Object.values(s.reviews||{}).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const el=document.getElementById('st-reviews-list');
+    if(!reviews.length){el.innerHTML='<div class="nd" style="padding:2rem;">No class reviews yet. Your teacher will add reviews after each class.</div>';return;}
+    el.innerHTML=reviews.map(r=>`
+      <div style="border:1.5px solid #eee;border-radius:12px;padding:14px 16px;margin-bottom:10px;background:#fff;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+          <span style="font-size:15px;font-weight:700;color:#1a1a1a;">📘 ${r.concept}</span>
+          <span class="bdg ${r.understanding==='Excellent'?'g':r.understanding==='Good'?'b':r.understanding==='Needs Practice'?'y':'r'}">${r.understanding}</span>
+          <span style="font-size:11px;color:#bbb;margin-left:auto;">${new Date(r.date).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</span>
+        </div>
+        ${r.notes?`<div style="font-size:13px;color:#444;line-height:1.7;background:#fafaf8;border-radius:8px;padding:9px 12px;">${r.notes}</div>`:''}
+      </div>`).join('');
+  });
+}
+
+function loadStudentHW(){
+  gdb().then(()=>{
+    const s=getMyStudentObj();
+    if(!s){document.getElementById('st-hw-list').innerHTML='<div class="nd">Could not load data.</div>';return;}
+    const hs=Object.values(s.homework||{}).sort((a,b)=>new Date(b.at)-new Date(a.at));
+    const el=document.getElementById('st-hw-list');
+    if(!hs.length){el.innerHTML='<div class="nd" style="padding:2rem;">No homework assigned yet. Check back soon!</div>';return;}
+    el.innerHTML=hs.map(h=>{
+      const sub=h.submission;
+      const hasPdf=!!h.data,hasLink=!!h.fileLink,hasWs=!!h.worksheet;
+      let actions='';
+      if(hasWs){
+        if(sub){
+          actions=`<span class="bdg g">✅ Submitted</span> <button class="btn sm b" onclick="viewMyResult('${h.id}')">View My Score</button>`;
+        }else{
+          actions=`<button class="btn g" onclick="openWorksheet('${h.id}')">✏️ Do Homework</button>`;
+        }
+      }else if(hasPdf||hasLink){
+        actions=`<button class="btn sm b" onclick="viewStudentFile('${h.id}')">📄 View</button>`;
+      }
+      return `<div style="border:1.5px solid ${sub?'#a9dfbf':'#eee'};background:${sub?'#edfaf1':'#fff'};border-radius:12px;padding:13px 15px;margin-bottom:10px;">
+        <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:24px;">${hasWs?'✏️':'📝'}</span>
+          <div style="flex:1;">
+            <div style="font-size:14px;font-weight:700;color:#1a1a1a;">${h.title}</div>
+            <div style="font-size:12px;color:#999;margin-top:3px;">
+              <span class="bdg ${h.type==='Homework'?'y':'b'}">${h.type}</span>
+              ${h.cls?` · Class ${h.cls}`:''}
+              · Assigned ${new Date(h.at).toLocaleDateString('en-IN')}
+              ${hasWs?' · <span style="color:#166534;font-weight:600;">Live Worksheet</span>':''}
+            </div>
+            ${sub?`<div style="font-size:12px;color:#1a7a3a;margin-top:4px;font-weight:600;">✅ Submitted · Score: ${sub.score}/${sub.total} (${sub.total>0?Math.round(sub.score/sub.total*100):0}%)</div>`:''}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${actions}</div>
+        </div>
+      </div>`;
+    }).join('');
+  });
+}
+
+function loadStudentMeet(){
+  gdb().then(()=>{
+    const s=getMyStudentObj();
+    const el=document.getElementById('st-meet-info');
+    if(s&&s.meet){
+      el.innerHTML=`<div class="meet-box" style="margin-bottom:1rem;">🎥 <a href="${s.meet}" target="_blank">${s.meet}</a></div>
+      <button class="btn g" style="width:100%;padding:13px;font-size:15px;" onclick="window.open('${s.meet}','_blank')">🚀 Join My Class</button>`;
+    }else{
+      el.innerHTML='<div class="nd" style="padding:2rem;">No class link assigned yet. Contact your teacher.</div>';
+    }
+  });
+}
+
+// ── STUDENT: WORKSHEET ────────────────────────────────
+function openWorksheet(hid){
+  const s=getMyStudentObj();
+  const h=s.homework[hid];
+  if(!h||!h.worksheet){alert('Worksheet not found.');return;}
+  if(h.submission){
+    if(!confirm('You already submitted this. View your score instead?')){return;}
+    viewMyResult(hid);return;
+  }
+  wsCurrentHwId=hid;wsCurrentTid=sTid;wsCurSid=sSid;
+  document.getElementById('ws-title').textContent='✏️ '+h.title;
+  document.getElementById('ws-result').style.display='none';
+  document.getElementById('ws-submit-btn').style.display='inline-block';
+  document.getElementById('ws-content').innerHTML=`<div style="font-size:12px;color:#854d0e;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px;">
+    Fill in all answers below, then click Submit Answers. You can only submit once.
+  </div><div id="ws-questions">${h.worksheet}</div>`;
+  // Style inputs
+  document.querySelectorAll('#ws-questions input').forEach(inp=>{
+    inp.style.cssText='border:1.5px solid #d4a017;border-radius:7px;padding:6px 10px;font-size:13px;outline:none;min-width:120px;';
+  });
+  openM('m-worksheet');
+}
+
+async function submitWorksheet(){
+  const s=getMyStudentObj();
+  const h=s.homework[wsCurrentHwId];
+  if(!h){alert('Error: Homework not found.');return;}
+  const inputs=document.querySelectorAll('#ws-questions input[data-answer]');
+  if(!inputs.length){alert('No questions found in this worksheet.');return;}
+  if(!confirm('Submit your answers? You cannot change them after submitting.'))return;
+  let score=0,total=0;
+  const answers=[];
+  inputs.forEach(inp=>{
+    const expected=(inp.getAttribute('data-answer')||'').trim().toLowerCase();
+    const given=(inp.value||'').trim().toLowerCase();
+    const correct=given===expected&&given!=='';
+    if(correct)score++;
+    total++;
+    answers.push({given:inp.value.trim(),expected:inp.getAttribute('data-answer'),correct});
+  });
+  const submission={score,total,answers,at:new Date().toISOString()};
+  db.teachers[wsCurrentTid].students[wsCurSid].homework[wsCurrentHwId].submission=submission;
+  document.getElementById('ws-submit-btn').innerHTML='<span class="sp"></span>Saving...';
+  document.getElementById('ws-submit-btn').disabled=true;
+  await sdb();
+  // Show result
+  const pct=total>0?Math.round(score/total*100):0;
+  const color=pct>=80?'#1a7a3a':pct>=50?'#854d0e':'#c0392b';
+  document.getElementById('ws-result').innerHTML=`
+    <div style="background:#f9f9f6;border-radius:12px;padding:1.2rem;text-align:center;border:2px solid ${pct>=80?'#a9dfbf':pct>=50?'#fde68a':'#fcc'};">
+      <div style="font-size:32px;font-weight:800;color:${color};">${score}/${total}</div>
+      <div style="font-size:15px;color:#666;margin-top:6px;">${pct}% correct</div>
+      <div style="font-size:13px;color:#999;margin-top:4px;">${pct>=80?'🌟 Excellent work!':pct>=50?'👍 Good effort, keep practising!':'💪 Keep trying, you will get there!'}</div>
+    </div>`;
+  document.getElementById('ws-result').style.display='block';
+  document.getElementById('ws-submit-btn').style.display='none';
+  loadStudentHW();
+}
+
+function viewMyResult(hid){
+  const s=getMyStudentObj();
+  const h=s.homework[hid];
+  if(!h||!h.submission){alert('No result found.');return;}
+  const sub=h.submission;
+  const pct=sub.total>0?Math.round(sub.score/sub.total*100):0;
+  const color=pct>=80?'#1a7a3a':pct>=50?'#854d0e':'#c0392b';
+  document.getElementById('ws-title').textContent='📊 My Results: '+h.title;
+  document.getElementById('ws-submit-btn').style.display='none';
+  let html=`<div style="background:#f9f9f6;border-radius:12px;padding:1.2rem;text-align:center;margin-bottom:1rem;">
+    <div style="font-size:32px;font-weight:800;color:${color};">${sub.score}/${sub.total}</div>
+    <div style="font-size:14px;color:#666;margin-top:5px;">${pct}% correct</div>
+    <div style="font-size:13px;color:#999;margin-top:3px;">Submitted ${new Date(sub.at).toLocaleDateString('en-IN')}</div>
+  </div>`;
+  if(sub.answers&&sub.answers.length){
+    sub.answers.forEach((a,i)=>{
+      const ok=a.correct;
+      html+=`<div style="border:1.5px solid ${ok?'#a9dfbf':'#fcc'};background:${ok?'#edfaf1':'#fff5f5'};border-radius:9px;padding:9px 12px;margin-bottom:7px;">
+        <div style="font-size:12px;font-weight:700;color:${ok?'#1a7a3a':'#c0392b'};">${ok?'✅ Correct':'❌ Wrong'} — Q${i+1}</div>
+        <div style="font-size:12px;color:#444;margin-top:2px;">Your answer: <strong>${a.given||'(blank)'}</strong></div>
+        ${!ok?`<div style="font-size:12px;color:#1a7a3a;">Correct answer: <strong>${a.expected}</strong></div>`:''}
+      </div>`;
+    });
+  }
+  document.getElementById('ws-content').innerHTML=html;
+  document.getElementById('ws-result').style.display='none';
+  openM('m-worksheet');
+}
+
+function viewStudentFile(hid){
+  const s=getMyStudentObj();
+  const h=s.homework[hid];
+  if(!h){alert('Not found.');return;}
+  viewPDFGeneric(h);
+}
+
+function viewPDFGeneric(item){
+  if(item.fileLink){
+    let url=item.fileLink;
+    if(url.includes('drive.google.com/file/d/')){const m=url.match(/\/d\/([^\/\?]+)/);if(m)url='https://drive.google.com/file/d/'+m[1]+'/preview';}
+    const w=window.open('','_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>${item.title}</title><style>body{margin:0;background:#222;display:flex;flex-direction:column;height:100vh;font-family:sans-serif;}.bar{background:#1a1a1a;color:#f5c842;padding:10px 16px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px;flex-shrink:0;}iframe{flex:1;border:none;width:100%;}</style></head><body><div class="bar">📄 ${item.title}</div><iframe src="${url}"></iframe></body></html>`);
+    w.document.close();return;
+  }
+  if(item.data){
+    const w=window.open('','_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>${item.title}</title><style>body{margin:0;background:#222;display:flex;flex-direction:column;height:100vh;font-family:sans-serif;}.bar{background:#1a1a1a;color:#f5c842;padding:10px 16px;font-size:14px;font-weight:600;}iframe{flex:1;border:none;width:100%;}</style></head><body><div class="bar">📄 ${item.title}</div><iframe src="${item.data}#toolbar=0"></iframe></body></html>`);
+    w.document.close();
+  }
+}
+
+// ── STUDENT: CHANGE PASSWORD ──────────────────────────
+async function changeStudentPass(){
+  const oldP=document.getElementById('stp-old').value.trim();
+  const newP=document.getElementById('stp-new').value.trim();
+  const conP=document.getElementById('stp-con').value.trim();
+  const msg=document.getElementById('stp-msg');
+  const s=getMyStudentObj();
+  if(!s){msg.className='msg er';msg.textContent='Error: Student not found.';msg.style.display='block';return;}
+  if(oldP!==s.password){msg.className='msg er';msg.textContent='Current password is incorrect.';msg.style.display='block';return;}
+  if(newP.length<4){msg.className='msg er';msg.textContent='New password must be at least 4 characters.';msg.style.display='block';return;}
+  if(newP!==conP){msg.className='msg er';msg.textContent='New passwords do not match.';msg.style.display='block';return;}
+  msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Saving...';msg.style.display='block';
+  db.teachers[sTid].students[sSid].password=newP;
+  await sdb();
+  msg.className='msg ok';msg.textContent='✓ Password updated!';
+  setTimeout(()=>{closeM('m-stpass');['stp-old','stp-new','stp-con'].forEach(i=>document.getElementById(i).value='');msg.style.display='none';},1500);
+}
+
+// ── ADMIN: EDIT STUDENT CREDENTIALS ──────────────────
+function editStudentCreds(sid){
+  const s=db.teachers[sTid].students[sid];
+  const newU=prompt('Edit username for '+s.name+':', s.username||'');
+  if(newU===null)return;
+  const newP=prompt('Edit password for '+s.name+':', s.password||'');
+  if(newP===null)return;
+  if(!newU||!newP||newP.length<4){alert('Username and password (min 4 chars) required.');return;}
+  // Check username uniqueness
+  for(const tid of Object.keys(db.teachers)){
+    const dup=Object.values(db.teachers[tid].students||{}).find(x=>x.username===newU&&x.id!==sid);
+    if(dup){alert('Username already taken. Choose another.');return;}
+  }
+  db.teachers[sTid].students[sid].username=newU;
+  db.teachers[sTid].students[sid].password=newP;
+  sdb().then(()=>{loadStudents();alert('✓ Credentials updated!');});
 }
 </script>
 </body></html>
