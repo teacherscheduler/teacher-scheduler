@@ -1272,6 +1272,51 @@ function reopenMeet(){
   if(currentMeetUrl)window.open(currentMeetUrl,'_blank');
 }
 
+function showRecordingInstructions(){
+  return new Promise(resolve=>{
+    // Remove any existing instruction overlay
+    const old=document.getElementById('rec-instructions-overlay');
+    if(old)old.remove();
+
+    const ov=document.createElement('div');
+    ov.id='rec-instructions-overlay';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;z-index:9999;padding:1rem;';
+    ov.innerHTML=`
+      <div style="background:#fff;border-radius:20px;padding:1.8rem;max-width:480px;width:100%;box-shadow:0 24px 80px rgba(0,0,0,0.5);">
+        <div style="font-size:20px;font-weight:800;color:#1a1a1a;margin-bottom:4px;">🎙️ Record Both Voices</div>
+        <div style="font-size:13px;color:#999;margin-bottom:1.2rem;">Follow these steps to capture student audio correctly</div>
+        <div style="background:#fefce8;border:1.5px solid #fde68a;border-radius:12px;padding:1rem;margin-bottom:1.2rem;">
+          <div style="font-size:12px;font-weight:800;color:#854d0e;margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em;">⚠️ Critical — Do this in the share dialog:</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#333;">
+              <span style="background:#d4a017;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;margin-top:1px;">1</span>
+              <span>Click <strong>"Chrome Tab"</strong> tab at the top of the share dialog</span>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#333;">
+              <span style="background:#d4a017;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;margin-top:1px;">2</span>
+              <span>Select the <strong>Google Meet tab</strong> from the list</span>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#333;">
+              <span style="background:#1a7a3a;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;margin-top:1px;">3</span>
+              <span>✅ <strong>Tick "Share tab audio"</strong> checkbox — this captures the student's voice!</span>
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#333;">
+              <span style="background:#1d4ed8;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;margin-top:1px;">4</span>
+              <span>Click <strong>"Share"</strong></span>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#999;margin-bottom:1.2rem;background:#f9f9f6;border-radius:9px;padding:9px 12px;">
+          🎤 Your microphone (teacher voice) will be captured automatically.<br>
+          🔊 Student voice is only captured if you share the Meet tab with audio ticked.
+        </div>
+        <button onclick="document.getElementById('rec-instructions-overlay').remove();" style="width:100%;padding:13px;background:linear-gradient(135deg,#d4a017,#f5c842);color:#fff;border:none;border-radius:11px;font-size:15px;font-weight:700;cursor:pointer;" id="rec-instr-ok">Got it — Start Recording</button>
+      </div>`;
+    document.body.appendChild(ov);
+    document.getElementById('rec-instr-ok').onclick=()=>{ov.remove();resolve();};
+  });
+}
+
 async function startClassAndRecord(){
   // 1. Open Meet in new tab first
   if(currentMeetUrl){
@@ -1281,7 +1326,8 @@ async function startClassAndRecord(){
     if(!go)return;
   }
 
-  await new Promise(r=>setTimeout(r,800));
+  // Show instructions modal before requesting capture
+  await showRecordingInstructions();
 
   // 2. Request microphone FIRST (before screen share)
   let micStream=null;
@@ -1296,27 +1342,44 @@ async function startClassAndRecord(){
       video:false
     });
   }catch(micErr){
-    const proceed=confirm('Microphone access was denied or not available.\n\nThe recording will only capture system audio (student voice from Meet) but NOT your voice.\n\nContinue anyway?');
+    const proceed=confirm('Microphone access was denied.\n\nYour voice (teacher) will NOT be recorded.\n\nContinue anyway?');
     if(!proceed)return;
   }
 
-  // 3. Now request screen share
+  // 3. Request screen share — guide user to pick the Meet TAB with audio
   let screenStream=null;
   try{
     screenStream=await navigator.mediaDevices.getDisplayMedia({
-      video:{frameRate:24},
-      audio:{
-        echoCancellation:false,
-        noiseSuppression:false,
-        autoGainControl:false,
-        sampleRate:44100
-      }
+      video:{frameRate:24,displaySurface:'browser'},
+      audio:true,
+      selfBrowserSurface:'exclude',
+      surfaceSwitching:'include',
+      systemAudio:'include'
     });
   }catch(e){
     if(micStream)micStream.getTracks().forEach(t=>t.stop());
     if(e.name!=='NotAllowedError')alert('Could not start screen recording: '+e.message);
     document.getElementById('rec-idle-bar').style.display='flex';
     return;
+  }
+
+  // Warn if no system/tab audio track was captured
+  const sysAudioTracksCheck=screenStream.getAudioTracks();
+  if(sysAudioTracksCheck.length===0){
+    const continueAnyway=confirm(
+      '⚠️ Student audio NOT captured!\n\n'+
+      'To record the student\'s voice:\n'+
+      '1. Click "Stop & Upload" to cancel\n'+
+      '2. Click "Start Class + Record" again\n'+
+      '3. In the share dialog → choose "Chrome Tab" → select the Google Meet tab → ✅ tick "Share tab audio"\n\n'+
+      'Continue with mic-only recording (no student audio)?'
+    );
+    if(!continueAnyway){
+      screenStream.getTracks().forEach(t=>t.stop());
+      if(micStream)micStream.getTracks().forEach(t=>t.stop());
+      document.getElementById('rec-idle-bar').style.display='flex';
+      return;
+    }
   }
 
   // 4. Mix audio: mic + system audio using AudioContext
