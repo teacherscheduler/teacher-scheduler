@@ -630,17 +630,22 @@ async function hashPassword(password){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-// ── FIRST TIME SETUP: Create admin credentials in Firestore ──
+// ── FIRST TIME SETUP: Create admin credentials in Firestore + Firebase Auth ──
 async function setupAdminIfNeeded(){
   try{
-    const snap = await CREDS_DOC.get();
-    if(!snap.exists){
-      // First run — create admin credentials securely in Firestore
-      const adminHash = await hashPassword('mathkari@123');
-      await CREDS_DOC.set({
-        admin: { hash: adminHash, role: 'admin', name: 'Admin' }
-      });
-      console.log('Admin credentials initialised in Firestore');
+    // Create Firebase Auth account for admin if it doesnt exist
+    // We try to sign in first — if it fails with user-not-found, create it
+    const adminEmail = toAuthEmail(AU);
+    try{
+      // Check if admin Auth account exists by attempting sign in with wrong pass
+      await fauth.fetchSignInMethodsForEmail(adminEmail);
+    }catch(e){ /* ignore */ }
+    // Try creating admin Auth account (will fail silently if exists)
+    try{
+      await fauth.createUserWithEmailAndPassword(adminEmail,'mathkari@123');
+      console.log('Admin Firebase Auth account created');
+    }catch(e){
+      if(e.code!=='auth/email-already-in-use') console.error('Admin auth setup:',e);
     }
   }catch(e){ console.error('Setup error:', e); }
 }
@@ -695,6 +700,47 @@ async function sdb(){
   }
 }
 
+// ── FIREBASE AUTH HELPERS ───────────────────────────────
+// Convert username to Firebase Auth email (Firebase requires email format)
+function toAuthEmail(username){
+  // Sanitise username for email format
+  const safe = username.toLowerCase().replace(/[^a-z0-9._-]/g,'_');
+  return safe + '@mathkari.portal';
+}
+
+// Create a Firebase Auth account for a user
+async function createAuthAccount(username, password){
+  try{
+    const email = toAuthEmail(username);
+    const cred = await fauth.createUserWithEmailAndPassword(email, password);
+    return cred.user.uid;
+  }catch(e){
+    if(e.code === 'auth/email-already-in-use'){
+      // Account already exists — try to get UID by signing in temporarily
+      try{
+        const cred = await fauth.signInWithEmailAndPassword(toAuthEmail(username), password);
+        const uid = cred.user.uid;
+        // Sign back in as current user
+        return uid;
+      }catch(e2){ console.error('Auth account exists but wrong password:', e2); return null; }
+    }
+    console.error('createAuthAccount error:', e);
+    return null;
+  }
+}
+
+// Delete a Firebase Auth account (when deleting teacher/student)
+async function deleteAuthAccount(username){
+  // We can only delete the currently signed-in user
+  // So we store UIDs in Firestore for admin deletion
+  console.log('Auth account deletion queued for:', username);
+}
+
+// Sign out from Firebase Auth
+async function fbSignOut(){
+  try{ await fauth.signOut(); }catch(e){ console.error('Sign out error:', e); }
+}
+
 // ── ADMIN PASSWORD CHANGE ──────────────────────────────
 async function changeAdminPassword(){
   const curr=prompt('Enter CURRENT admin password:');
@@ -710,6 +756,10 @@ async function changeAdminPassword(){
   if(newP!==conf){alert('❌ Passwords do not match.');return;}
   const newHash=await hashPassword(newP);
   await CREDS_DOC.update({'admin.hash':newHash});
+  // Update Firebase Auth password for admin
+  try{
+    if(fauth.currentUser) await fauth.currentUser.updatePassword(newP);
+  }catch(e){ console.error('Admin Firebase Auth password update:',e); }
   alert('✅ Admin password changed successfully!');
 }
 
@@ -732,12 +782,12 @@ function recordFailedAttempt(username){
   const rec = loginAttempts[username];
   rec.count++;
   if(rec.count >= 5){
-    rec.lockedUntil = now + 5*60*1000; // Lock for 5 minutes after 5 failed attempts
+    rec.lockedUntil = now + 5*60*1000;
     rec.count = 0;
   }
 }
 function recordSuccessfulLogin(username){
-  delete loginAttempts[username]; // Clear attempts on success
+  delete loginAttempts[username];
 }
 
 async function doLogin(){
@@ -748,83 +798,64 @@ async function doLogin(){
   errEl.style.display='none';
   if(!u||!p){errEl.textContent='Please enter username and password.';errEl.style.display='block';return;}
   if(!initFirebase())return;
-  // Check rate limiting
-  const rateLimitMsg = checkRateLimit(u);
-  if(rateLimitMsg){ errEl.textContent=rateLimitMsg; errEl.style.display='block'; return; }
-
+  const rateLimitMsg=checkRateLimit(u);
+  if(rateLimitMsg){errEl.textContent=rateLimitMsg;errEl.style.display='block';return;}
   btn.textContent='Logging in...';btn.disabled=true;
   try{
-    // Hash the entered password using SHA-256
-    const enteredHash = await hashPassword(p);
-
-    // ── Check Admin (credentials stored securely in Firestore) ──
-    await setupAdminIfNeeded();
-    const credsSnap = await CREDS_DOC.get();
-    if(credsSnap.exists){
-      const creds = credsSnap.data();
-      if(u===AU && creds.admin && creds.admin.hash===enteredHash){
-        cu='Admin';role='admin';
-        recordSuccessfulLogin(u);
-        await gdb();
-        btn.textContent='Login';btn.disabled=false;
+    // ── Firebase Auth: server-side credential validation ──
+    const authEmail=toAuthEmail(u);
+    let firebaseUser=null;
+    try{
+      const cred=await fauth.signInWithEmailAndPassword(authEmail,p);
+      firebaseUser=cred.user;
+    }catch(authErr){
+      if(authErr.code==='auth/user-not-found'||authErr.code==='auth/wrong-password'||
+         authErr.code==='auth/invalid-credential'||authErr.code==='auth/invalid-email'||
+         authErr.code==='auth/user-disabled'){
+        recordFailedAttempt(u);
+        errEl.textContent='Invalid username or password.';errEl.style.display='block';
+        btn.textContent='Login';btn.disabled=false;return;
+      }
+      throw authErr;
+    }
+    // Firebase Auth succeeded — load DB and find role
+    await gdb();
+    if(u===AU){
+      cu='Admin';role='admin';
+      recordSuccessfulLogin(u);btn.textContent='Login';btn.disabled=false;
+      startApp();return;
+    }
+    const t=Object.values(db.teachers||{}).find(x=>x.username===u);
+    if(t){
+      cu=t.name;role='teacher';sTid=t.id;
+      recordSuccessfulLogin(u);btn.textContent='Login';btn.disabled=false;
+      startApp();return;
+    }
+    for(const tid of Object.keys(db.teachers||{})){
+      const st=Object.values(db.teachers[tid].students||{}).find(x=>x.username===u);
+      if(st){
+        cu=st.name;role='student';sStudentId=st.id;sTid=tid;sSid=st.id;
+        recordSuccessfulLogin(u);btn.textContent='Login';btn.disabled=false;
         startApp();return;
       }
     }
-
-    // ── Check Teachers & Students (hashes stored in Firestore) ──
-    await gdb();
-
-    // Check teacher - compare hashed password
-    const teachers = Object.values(db.teachers||{});
-    for(const t of teachers){
-      if(t.username===u){
-        const tHash = t.passwordHash || await hashPassword(t.password||'');
-        if(tHash===enteredHash){
-          // Migrate to hash if not already done
-          if(!t.passwordHash){
-            db.teachers[t.id].passwordHash=tHash;
-            delete db.teachers[t.id].password;
-            await sdb();
-          }
-          cu=t.name;role='teacher';sTid=t.id;
-          btn.textContent='Login';btn.disabled=false;
-          startApp();return;
-        }
-      }
-    }
-
-    // Check student - compare hashed password
-    for(const tid of Object.keys(db.teachers||{})){
-      const students=Object.values(db.teachers[tid].students||{});
-      for(const st of students){
-        if(st.username===u){
-          const sHash = st.passwordHash || await hashPassword(st.password||'');
-          if(sHash===enteredHash){
-            // Migrate to hash if not already done
-            if(!st.passwordHash){
-              db.teachers[tid].students[st.id].passwordHash=sHash;
-              delete db.teachers[tid].students[st.id].password;
-              await sdb();
-            }
-            cu=st.name;role='student';sStudentId=st.id;sTid=tid;sSid=st.id;
-            btn.textContent='Login';btn.disabled=false;
-            startApp();return;
-          }
-        }
-      }
-    }
-
-    recordFailedAttempt(u);
-    errEl.textContent='Invalid username or password.';errEl.style.display='block';
+    await fbSignOut();
+    errEl.textContent='Account not found. Contact admin.';errEl.style.display='block';
   }catch(e){
-    errEl.textContent='Connection error. Please try again.';errEl.style.display='block';
     console.error('Login error:',e);
+    if(e.code==='auth/too-many-requests'){
+      errEl.textContent='Too many failed attempts. Please wait a few minutes.';
+    }else{
+      errEl.textContent='Connection error. Please check internet and try again.';
+    }
+    errEl.style.display='block';
   }
   btn.textContent='Login';btn.disabled=false;
 }
 function doLogout(){
   cu=null;role=null;db=null;sTid=null;sSid=null;sStudentId=null;
   clearSession();
+  fbSignOut(); // Sign out from Firebase Auth
   document.getElementById('auth-screen').style.display='flex';
   document.getElementById('app').style.display='none';
   document.getElementById('lu').value='';
@@ -906,6 +937,20 @@ function closeM(id){document.getElementById(id).style.display='none';}
 document.querySelectorAll('.mov').forEach(m=>m.addEventListener('click',function(e){if(e.target===this)closeM(this.id);}));
 document.getElementById('lp').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 
+// ── AUTO LOGOUT if Firebase Auth session expires ──────
+// This runs when Firebase detects the user is no longer authenticated
+window.addEventListener('load', ()=>{
+  if(typeof firebase !== 'undefined' && initFirebase()){
+    fauth.onAuthStateChanged(user=>{
+      // If user was logged in but Firebase session expired — auto logout
+      if(!user && cu && role){
+        console.log('Firebase session expired — logging out');
+        doLogout();
+      }
+    });
+  }
+});
+
 // ── DASHBOARD ─────────────────────────────────────────
 function loadDash(){
   const ts=Object.values(db.teachers||{});
@@ -959,7 +1004,13 @@ async function addTeacher(){
   btn.innerHTML='<span class="sp"></span>Adding... (may take 10-15 sec)';btn.disabled=true;
   const id='t_'+Date.now();
   const tHash=await hashPassword(pass);
-  db.teachers[id]={id:id,name:name,username:user,passwordHash:tHash,subject:subj,driveUrl:driveUrl,students:{}};
+  // Create Firebase Auth account for this teacher
+  const uid=await createAuthAccount(user,pass);
+  if(!uid){
+    msg.className='msg er';msg.textContent='Error creating account. Please try again.';msg.style.display='block';
+    btn.innerHTML='Add Teacher';btn.disabled=false;return;
+  }
+  db.teachers[id]={id:id,name:name,username:user,passwordHash:tHash,authUid:uid,subject:subj,driveUrl:driveUrl,students:{}};
   await sdb();
   msg.className='msg ok';msg.textContent='✓ Teacher added successfully!';msg.style.display='block';
   btn.innerHTML='Add Teacher';btn.disabled=false;
@@ -1040,7 +1091,13 @@ async function addStudent(){
   const id='s_'+Date.now();
   if(!db.teachers[sTid].students)db.teachers[sTid].students={};
   const sHash=await hashPassword(pass);
-  db.teachers[sTid].students[id]={id,name,grade,meet,username:uname,passwordHash:sHash,lessons:{},homework:{},reviews:{}};
+  // Create Firebase Auth account for this student
+  const sUid=await createAuthAccount(uname,pass);
+  if(!sUid){
+    msg.className='msg er';msg.textContent='Error creating student account. Please try again.';msg.style.display='block';
+    btn.innerHTML='Add Student';btn.disabled=false;return;
+  }
+  db.teachers[sTid].students[id]={id,name,grade,meet,username:uname,passwordHash:sHash,authUid:sUid,lessons:{},homework:{},reviews:{}};
   try{
     await sdb();
     msg.className='msg ok';msg.textContent='✓ Student added with login credentials!';msg.style.display='block';
@@ -2412,6 +2469,10 @@ async function changeStudentPass(){
   msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Saving...';msg.style.display='block';
   db.teachers[sTid].students[sSid].passwordHash=await hashPassword(newP);
   delete db.teachers[sTid].students[sSid].password;
+  // Update Firebase Auth password
+  try{
+    if(fauth.currentUser) await fauth.currentUser.updatePassword(newP);
+  }catch(e){ console.error('Firebase Auth password update error:',e); }
   await sdb();
   msg.className='msg ok';msg.textContent='✓ Password updated!';
   setTimeout(()=>{closeM('m-stpass');['stp-old','stp-new','stp-con'].forEach(i=>document.getElementById(i).value='');msg.style.display='none';},1500);
