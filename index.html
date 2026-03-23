@@ -859,11 +859,22 @@ async function prepareWorksheetHtml(rawHtml){
     <div class="fg" style="margin-bottom:10px;"><label>Worksheet Title *</label><input id="fws-title" placeholder="e.g. Addition to 20"/></div>
     <div class="fg" style="margin-bottom:10px;"><label>Topics Covered</label><input id="fws-topics" placeholder="e.g. Single digit addition, number bonds"/></div>
     <div class="fg" style="margin-bottom:10px;"><label>Description</label><textarea id="fws-desc" rows="2" placeholder="Brief description for students and parents..." style="width:100%;padding:10px;border:1.5px solid #e5e5e5;border-radius:8px;resize:vertical;"></textarea></div>
-    <div class="fg" style="margin-bottom:6px;"><label>Google Drive Link *</label>
-      <input id="fws-drive-link" placeholder="https://drive.google.com/file/d/.../view" style="width:100%;padding:10px;border:1.5px solid #e5e5e5;border-radius:8px;font-size:13px;"/>
+    <!-- Option A: Google Drive PDF -->
+    <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:700;color:#1d4ed8;margin-bottom:8px;">📄 Option 1: Google Drive PDF</div>
+      <div class="fg" style="margin-bottom:0;">
+        <input id="fws-drive-link" placeholder="https://drive.google.com/file/d/.../view" style="width:100%;padding:9px 12px;border:1.5px solid #bfdbfe;border-radius:8px;font-size:13px;"/>
+      </div>
+      <div style="font-size:11px;color:#555;margin-top:6px;">Upload PDF to Google Drive → Share → "Anyone with the link" → paste link above</div>
     </div>
-    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#1d4ed8;">
-      💡 Upload your worksheet PDF to Google Drive → Right-click → Share → "Anyone with the link" → Copy link → Paste above
+    <!-- Option B: Live auto-graded HTML worksheet -->
+    <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:6px;">✨ Option 2: Live Auto-graded Worksheet</div>
+      <div style="font-size:11px;color:#555;margin-bottom:8px;">Type questions with answer inputs. Students submit and get scored instantly.</div>
+      <div style="font-size:11px;color:#444;background:#e0fcea;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-family:monospace;">
+        &lt;p&gt;Q1. What is 2+2? &lt;input data-answer="4" placeholder="Your answer"&gt;&lt;/p&gt;
+      </div>
+      <textarea id="fws-html" rows="5" placeholder='<p>Q1. What is 5 + 3? <input data-answer="8" placeholder="Your answer"></p>&#10;<p>Q2. Capital of India? <input data-answer="Delhi" placeholder="Your answer"></p>' style="width:100%;padding:9px 12px;font-size:12px;border:1.5px solid #bbf7d0;border-radius:8px;color:#1a1a1a;outline:none;background:#fff;resize:vertical;font-family:monospace;"></textarea>
     </div>
     <div id="fws-msg" style="display:none;margin-bottom:8px;"></div>
     <div class="mbtns">
@@ -1031,7 +1042,7 @@ async function prepareWorksheetHtml(rawHtml){
 
 <!-- Public: View worksheet from homepage -->
 <div class="mov" id="m-public-ws" style="display:none;">
-  <div class="mbox" style="max-width:680px;max-height:85vh;overflow-y:auto;">
+  <div class="mbox" style="max-width:740px;max-height:95vh;overflow-y:auto;padding:1.2rem;">
     <h3 id="pub-ws-title">Worksheet</h3>
     <div id="pub-ws-content"></div>
     <div id="pub-ws-result" style="display:none;margin-top:1rem;"></div>
@@ -1493,21 +1504,30 @@ async function savePublicWorksheet(){
   const title=document.getElementById('fws-title').value.trim();
   const topics=document.getElementById('fws-topics').value.trim();
   const desc=document.getElementById('fws-desc').value.trim();
-  let driveLink=document.getElementById('fws-drive-link').value.trim();
+  let driveLink=(document.getElementById('fws-drive-link').value||'').trim();
+  const html=(document.getElementById('fws-html').value||'').trim();
   const msg=document.getElementById('fws-msg');
   if(!grade||!subj||!title){msg.className='msg er';msg.textContent='Please fill Grade, Subject and Title.';msg.style.display='block';return;}
-  if(!driveLink){msg.className='msg er';msg.textContent='Please paste a Google Drive link for the worksheet.';msg.style.display='block';return;}
+  if(!driveLink&&!html){msg.className='msg er';msg.textContent='Please add a Google Drive link OR type a live worksheet.';msg.style.display='block';return;}
   // Normalise Google Drive share link to embeddable preview URL
-  if(driveLink.includes('drive.google.com/file/d/')){
+  if(driveLink&&driveLink.includes('drive.google.com/file/d/')){
     const m=driveLink.match(/\/d\/([^\/\?]+)/);
     if(m) driveLink='https://drive.google.com/file/d/'+m[1]+'/preview';
   }
   if(!db.publicWorksheets)db.publicWorksheets={};
   const id='pw_'+Date.now();
-  db.publicWorksheets[id]={id,grade,subject:subj,title,topics,desc,driveLink,createdAt:new Date().toISOString()};
+  const wsObj={id,grade,subject:subj,title,topics,desc,createdAt:new Date().toISOString()};
+  if(driveLink) wsObj.driveLink=driveLink;
+  if(html) wsObj.worksheetHtml=html;
+  db.publicWorksheets[id]=wsObj;
   await sdb();
   msg.className='msg ok';msg.textContent='✅ Worksheet published successfully!';msg.style.display='block';
-  setTimeout(()=>{closeM('m-add-free-ws');loadAdminWorksheets();['fws-grade','fws-subject','fws-title','fws-topics','fws-desc','fws-drive-link'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});msg.style.display='none';},1200);
+  setTimeout(()=>{
+    closeM('m-add-free-ws');
+    loadAdminWorksheets();
+    ['fws-grade','fws-subject','fws-title','fws-topics','fws-desc','fws-drive-link','fws-html'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
+    msg.style.display='none';
+  },1200);
 }
 
 function loadAdminWorksheets(){
@@ -1617,25 +1637,40 @@ async function previewPublicWs(id){
 async function openPublicWorksheet(w){
   document.getElementById('pub-ws-title').textContent='📝 '+w.title+' — Grade '+w.grade;
   const container=document.getElementById('pub-ws-content');
-  // Show Drive PDF in iframe, or fallback message
+  const submitBtn=document.getElementById('pub-ws-submit-btn');
+  document.getElementById('pub-ws-result').style.display='none';
+
   if(w.driveLink){
-    container.innerHTML=`<iframe src="${escHtml(w.driveLink)}" style="width:100%;height:520px;border:none;border-radius:8px;background:#f5f5f5;" allowfullscreen></iframe>`;
+    // Convert any Drive share link to a /preview embed URL
+    let embedUrl=w.driveLink;
+    const m=embedUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if(m) embedUrl='https://drive.google.com/file/d/'+m[1]+'/preview';
+
+    // Show iframe embed + fallback open button
+    container.innerHTML=
+      '<iframe src="'+embedUrl+'" style="width:100%;height:500px;border:none;border-radius:8px;background:#f5f5f5;" allow="autoplay" allowfullscreen></iframe>'+
+      '<div style="text-align:center;margin-top:10px;">'+
+        '<a href="'+embedUrl.replace('/preview','/view')+'" target="_blank" rel="noopener noreferrer" '+
+          'style="display:inline-block;padding:8px 20px;background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a0e00;border-radius:8px;font-weight:700;font-size:13px;text-decoration:none;">'+
+          '↗ Open in Google Drive'+
+        '</a>'+
+        '<div style="font-size:11px;color:#999;margin-top:6px;">If the preview does not load, click the button above</div>'+
+      '</div>';
+    submitBtn.style.display='none';
   } else if(w.worksheetHtml){
-    // Legacy: old worksheets stored as HTML
-    const safeHtml = await prepareWorksheetHtml(w.worksheetHtml||'');
+    // Legacy HTML worksheets
+    const safeHtml=await prepareWorksheetHtml(w.worksheetHtml||'');
     container.innerHTML=safeHtml||'<p style="color:#888;">No worksheet content.</p>';
     container.querySelectorAll('input[data-answer]').forEach(inp=>{
       inp.style.cssText='border:1.5px solid #d4a017;border-radius:6px;padding:6px 10px;font-size:14px;margin:4px 0;';
       inp.removeAttribute('disabled');inp.value='';
     });
+    submitBtn.style.display='inline-block';
+    submitBtn.dataset.wsId=w.id;
   } else {
     container.innerHTML='<p style="color:#888;">No worksheet content available.</p>';
+    submitBtn.style.display='none';
   }
-  document.getElementById('pub-ws-result').style.display='none';
-  // Hide submit button for Drive-based worksheets (PDF — nothing to grade)
-  const submitBtn=document.getElementById('pub-ws-submit-btn');
-  if(w.driveLink){ submitBtn.style.display='none'; }
-  else { submitBtn.style.display='inline-block'; submitBtn.dataset.wsId=w.id; }
   openM('m-public-ws');
 }
 
@@ -2013,7 +2048,7 @@ function loadStudentDemo(){
 // 🌐 HOMEPAGE — Dynamic worksheets from admin
 // ═══════════════════════════════════════════════════
 async function openGradeWorksheets(grade){
-  // Load from Firestore if available, otherwise use static list
+  // Show only admin-uploaded worksheets for this grade
   let adminWs=[];
   try{
     if(!PORTAL_DOC&&!initFirebase())throw new Error('no firebase');
@@ -2022,33 +2057,33 @@ async function openGradeWorksheets(grade){
     adminWs=Object.values(data.publicWorksheets||{}).filter(w=>w.grade==grade);
   }catch(e){adminWs=[];}
 
-  const staticList=GRADE_WORKSHEETS[grade]||[];
   document.getElementById('grade-ws-title').textContent='📚 Grade '+grade+' — Free Worksheets';
-
   const subjectIcons={Math:'📐',English:'📖',Coding:'💻'};
-  let adminSection='';
+
+  let wsSection='';
   if(adminWs.length){
     const bySubj={};
     adminWs.forEach(w=>{if(!bySubj[w.subject])bySubj[w.subject]=[];bySubj[w.subject].push(w);});
-    adminSection=Object.entries(bySubj).map(([subj,items])=>`
+    wsSection=Object.entries(bySubj).map(([subj,items])=>`
       <div style="margin-bottom:16px;">
-        <div style="font-weight:700;color:#d4a017;font-size:13px;margin-bottom:8px;">${subjectIcons[subj]||'📚'} ${subj} — Interactive Worksheets</div>
-        ${items.map(w=>`
-          <div class="gw-item" style="cursor:pointer;" onclick='openPublicWorksheetById("${w.id}")'>
-            <div><div class="gw-item-name">${w.title}</div><div class="gw-item-topic">${w.topics||w.desc||''}</div></div>
-            <span class="gw-free-badge">${w.driveLink?'📄 View PDF':'▶ Try Now'}</span>
-          </div>`).join('')}
+        <div style="font-weight:700;color:#d4a017;font-size:13px;margin-bottom:8px;">${subjectIcons[subj]||'📚'} ${subj}</div>
+        <div class="gw-list">
+          ${items.map(w=>`
+            <div class="gw-item" style="cursor:pointer;" onclick='openPublicWorksheetById("${w.id}")'>
+              <div>
+                <div class="gw-item-name">${w.title}</div>
+                ${w.topics?`<div class="gw-item-topic">${w.topics}</div>`:''}
+              </div>
+              <span class="gw-free-badge">📄 Open</span>
+            </div>`).join('')}
+        </div>
       </div>`).join('');
+  } else {
+    wsSection=`<div style="text-align:center;padding:2rem;color:#999;font-size:14px;">No worksheets uploaded yet for Grade ${grade}.</div>`;
   }
 
   document.getElementById('grade-ws-content').innerHTML=`
-    ${adminSection}
-    <div style="margin-bottom:16px;">
-      <div style="font-weight:700;color:#555;font-size:13px;margin-bottom:8px;">📋 All Topics for Grade ${grade}</div>
-      <div class="gw-list">
-        ${staticList.map((w,i)=>`<div class="gw-item"><div><div class="gw-item-name">${i+1}. ${w.name}</div><div class="gw-item-topic">${w.topic}</div></div><span class="gw-free-badge">FREE</span></div>`).join('')}
-      </div>
-    </div>
+    ${wsSection}
     <div style="margin-top:20px;padding:14px;background:#eff6ff;border-radius:10px;border:1px solid #bfdbfe;text-align:center;">
       <div style="font-weight:700;color:#1d4ed8;margin-bottom:6px;">Want a free demo class?</div>
       <div style="font-size:13px;color:#555;margin-bottom:12px;">Try a live class with our expert teachers — completely free!</div>
@@ -2063,7 +2098,11 @@ async function openPublicWorksheetById(id){
     const snap=await PORTAL_DOC.get();
     const data=snap.exists?snap.data():{};
     const w=(data.publicWorksheets||{})[id];
-    if(w){closeM('m-grade-ws');await openPublicWorksheet(w);}
+    if(w){
+      closeM('m-grade-ws');
+      // If Drive-based, open PDF directly in the worksheet modal
+      await openPublicWorksheet(w);
+    }
   }catch(e){alert('Could not load worksheet. Please check internet.');}
 }
 
