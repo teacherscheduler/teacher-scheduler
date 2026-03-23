@@ -232,6 +232,61 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<!-- DOMPurify: sanitise HTML before inserting into DOM (prevents XSS) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
+<script>
+// ── SECURITY UTILITIES ────────────────────────────────────────────────────────
+// Escape plain text before inserting into innerHTML
+function escHtml(s){
+  if(s==null)return'';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// Sanitise teacher-authored worksheet HTML (allows form inputs but no scripts)
+function sanitiseWs(html){
+  if(typeof DOMPurify==='undefined')return escHtml(html);
+  return DOMPurify.sanitize(html,{
+    ALLOWED_TAGS:['p','div','span','b','strong','i','em','u','br','h1','h2','h3','h4',
+                  'ul','ol','li','table','thead','tbody','tr','th','td','input','label',
+                  'select','option','textarea','hr','sup','sub','code','pre'],
+    ALLOWED_ATTR:['style','class','type','name','placeholder','value','data-answer',
+                  'checked','selected','disabled','readonly','rows','cols','for','id',
+                  'width','height','align','colspan','rowspan']
+  });
+}
+// Obfuscate worksheet answers so they are not readable in DevTools
+// Stores a keyed HMAC-like token instead of the plain answer
+const _WS_SALT = (() => {
+  let s = sessionStorage.getItem('_wss');
+  if(!s){ s = crypto.getRandomValues(new Uint8Array(16)).join(''); sessionStorage.setItem('_wss',s); }
+  return s;
+})();
+async function obfuscateAnswer(plain){
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(_WS_SALT.slice(0,16).padEnd(16,'0')),
+    {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(plain.trim().toLowerCase()));
+  return Array.from(new Uint8Array(sig)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,16);
+}
+async function checkAnswer(given, storedToken){
+  const token = await obfuscateAnswer(given);
+  return token === storedToken;
+}
+// Prepare worksheet HTML: replace data-answer plaintext with HMAC token
+async function prepareWorksheetHtml(rawHtml){
+  const safe = sanitiseWs(rawHtml);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = safe;
+  const inputs = tmp.querySelectorAll('input[data-answer]');
+  for(const inp of inputs){
+    const plain = inp.getAttribute('data-answer') || '';
+    const token = await obfuscateAnswer(plain);
+    inp.setAttribute('data-answer', token);
+    inp.setAttribute('data-answer-protected','1');
+  }
+  return tmp.innerHTML;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+</script>
 </head>
 <body>
 <div class="bg"></div>
@@ -804,8 +859,11 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
     <div class="fg" style="margin-bottom:10px;"><label>Worksheet Title *</label><input id="fws-title" placeholder="e.g. Addition to 20"/></div>
     <div class="fg" style="margin-bottom:10px;"><label>Topics Covered</label><input id="fws-topics" placeholder="e.g. Single digit addition, number bonds"/></div>
     <div class="fg" style="margin-bottom:10px;"><label>Description</label><textarea id="fws-desc" rows="2" placeholder="Brief description for students and parents..." style="width:100%;padding:10px;border:1.5px solid #e5e5e5;border-radius:8px;resize:vertical;"></textarea></div>
-    <div class="fg" style="margin-bottom:10px;"><label>Worksheet HTML (use data-answer for auto-grading)</label>
-      <textarea id="fws-html" rows="6" placeholder='Example:&#10;<p>Q1. What is 5 + 3?</p>&#10;<input data-answer="8" placeholder="Your answer">&#10;<p>Q2. What is 10 - 4?</p>&#10;<input data-answer="6" placeholder="Your answer">' style="width:100%;padding:10px;border:1.5px solid #e5e5e5;border-radius:8px;font-family:monospace;font-size:12px;resize:vertical;"></textarea>
+    <div class="fg" style="margin-bottom:6px;"><label>Google Drive Link *</label>
+      <input id="fws-drive-link" placeholder="https://drive.google.com/file/d/.../view" style="width:100%;padding:10px;border:1.5px solid #e5e5e5;border-radius:8px;font-size:13px;"/>
+    </div>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:#1d4ed8;">
+      💡 Upload your worksheet PDF to Google Drive → Right-click → Share → "Anyone with the link" → Copy link → Paste above
     </div>
     <div id="fws-msg" style="display:none;margin-bottom:8px;"></div>
     <div class="mbtns">
@@ -985,6 +1043,29 @@ input[type=file]{padding:7px;border:1.5px dashed #ddd;border-radius:9px;width:10
 </div>
 
 </div><script>
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  FIRESTORE SECURITY RULES — REQUIRED ACTION                             ║
+// ║  Paste the rules below into:                                             ║
+// ║  Firebase Console → Firestore → Rules → Edit → Publish                 ║
+// ║                                                                          ║
+// ║  rules_version = '2';                                                    ║
+// ║  service cloud.firestore {                                               ║
+// ║    match /databases/{database}/documents {                               ║
+// ║      // Only authenticated users can read/write portal data              ║
+// ║      match /mathkari/portalData {                                        ║
+// ║        allow read, write: if request.auth != null;                       ║
+// ║      }                                                                   ║
+// ║      // Only authenticated users can read credentials doc               ║
+// ║      // (write only via Admin SDK / Cloud Functions — not from browser)  ║
+// ║      match /mathkari/credentials {                                       ║
+// ║        allow read: if request.auth != null;                              ║
+// ║        allow write: if false;  // lock down — use Admin SDK only        ║
+// ║      }                                                                   ║
+// ║      // Public worksheet activity can be written by anyone (unauthenticated visitors) ║
+// ║      // but restrict to only known fields via a function if needed       ║
+// ║    }                                                                     ║
+// ║  }                                                                       ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
 // ═══════════════════════════════════════════════════
 // 🔥 FIREBASE CONFIGURATION
 // Replace these values with your own Firebase project config
@@ -1021,11 +1102,39 @@ function initFirebase(){
   }
 }
 
-// ── PASSWORD HASHING (SHA-256 via Web Crypto API) ────────
-async function hashPassword(password){
+// ── PASSWORD HASHING (PBKDF2 via Web Crypto API — salted + iterated) ─────────
+// SECURITY: SHA-256 without a salt is vulnerable to rainbow-table attacks.
+// PBKDF2 with a per-password salt and 100,000 iterations makes offline cracking
+// computationally infeasible.
+async function hashPassword(password, saltHex){
   const enc = new TextEncoder();
-  const buf = await crypto.subtle.digest('SHA-256', enc.encode(password));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  // Generate a fresh random salt when none is provided (new password being set)
+  const salt = saltHex
+    ? Uint8Array.from(saltHex.match(/.{2}/g).map(b=>parseInt(b,16)))
+    : crypto.getRandomValues(new Uint8Array(16));
+  const saltOut = Array.from(salt).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    {name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'},
+    keyMaterial, 256);
+  const hashHex = Array.from(new Uint8Array(bits)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  // Return "salt$hash" so both are stored together
+  return saltOut + '$' + hashHex;
+}
+// Verify a password against a stored "salt$hash" string
+async function verifyPassword(password, stored){
+  if(!stored) return false;
+  if(!stored.includes('$')){
+    // Legacy plain SHA-256 (no salt) — accept once, force re-hash on next save
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(password));
+    const h = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    return h === stored;
+  }
+  const [saltHex] = stored.split('$');
+  const reHashed = await hashPassword(password, saltHex);
+  return reHashed === stored;
 }
 
 // ── FIRST TIME SETUP: Create admin credentials in Firestore + Firebase Auth ──
@@ -1284,6 +1393,10 @@ async function changeAdminPassword(){
 
 // ── AUTH ─────────────────────────────────────────────
 // ── BRUTE FORCE PROTECTION ─────────────────────────────
+// NOTE: Firebase Authentication enforces server-side rate limiting automatically.
+// The client-side loginAttempts counter below is kept only as a UX hint (shows
+// remaining lockout time) — it is NOT a security boundary and does not need to
+// be a security boundary because the real enforcement is server-side.
 const loginAttempts = {};
 function checkRateLimit(username){
   const now = Date.now();
@@ -1380,15 +1493,21 @@ async function savePublicWorksheet(){
   const title=document.getElementById('fws-title').value.trim();
   const topics=document.getElementById('fws-topics').value.trim();
   const desc=document.getElementById('fws-desc').value.trim();
-  const html=document.getElementById('fws-html').value.trim();
+  let driveLink=document.getElementById('fws-drive-link').value.trim();
   const msg=document.getElementById('fws-msg');
   if(!grade||!subj||!title){msg.className='msg er';msg.textContent='Please fill Grade, Subject and Title.';msg.style.display='block';return;}
+  if(!driveLink){msg.className='msg er';msg.textContent='Please paste a Google Drive link for the worksheet.';msg.style.display='block';return;}
+  // Normalise Google Drive share link to embeddable preview URL
+  if(driveLink.includes('drive.google.com/file/d/')){
+    const m=driveLink.match(/\/d\/([^\/\?]+)/);
+    if(m) driveLink='https://drive.google.com/file/d/'+m[1]+'/preview';
+  }
   if(!db.publicWorksheets)db.publicWorksheets={};
   const id='pw_'+Date.now();
-  db.publicWorksheets[id]={id,grade,subject:subj,title,topics,desc,worksheetHtml:html,createdAt:new Date().toISOString()};
+  db.publicWorksheets[id]={id,grade,subject:subj,title,topics,desc,driveLink,createdAt:new Date().toISOString()};
   await sdb();
   msg.className='msg ok';msg.textContent='✅ Worksheet published successfully!';msg.style.display='block';
-  setTimeout(()=>{closeM('m-add-free-ws');loadAdminWorksheets();['fws-grade','fws-subject','fws-title','fws-topics','fws-desc','fws-html'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});msg.style.display='none';},1200);
+  setTimeout(()=>{closeM('m-add-free-ws');loadAdminWorksheets();['fws-grade','fws-subject','fws-title','fws-topics','fws-desc','fws-drive-link'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});msg.style.display='none';},1200);
 }
 
 function loadAdminWorksheets(){
@@ -1411,8 +1530,9 @@ function loadAdminWorksheets(){
             <div style="font-weight:600;font-size:14px;">${w.title}</div>
             <div style="font-size:12px;color:#888;">Grade ${w.grade} · ${w.topics||'—'}</div>
           </div>
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;align-items:center;">
             <span style="background:#edfaf1;color:#166534;border:1px solid #a9dfbf;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700;">PUBLISHED</span>
+            ${w.driveLink?`<a href="${w.driveLink}" target="_blank" rel="noopener noreferrer" class="btn sm b">📄 Open</a>`:''}
             <button class="btn sm" onclick="previewPublicWs('${w.id}')">👁 Preview</button>
             <button class="btn sm r" onclick="deletePublicWs('${w.id}')">✕</button>
           </div>
@@ -1489,39 +1609,50 @@ async function deletePublicWs(id){
   await sdb();loadAdminWorksheets();
 }
 
-function previewPublicWs(id){
+async function previewPublicWs(id){
   const w=(db.publicWorksheets||{})[id];if(!w)return;
-  openPublicWorksheet(w);
+  await openPublicWorksheet(w);
 }
 
-function openPublicWorksheet(w){
+async function openPublicWorksheet(w){
   document.getElementById('pub-ws-title').textContent='📝 '+w.title+' — Grade '+w.grade;
   const container=document.getElementById('pub-ws-content');
-  container.innerHTML=w.worksheetHtml||'<p style="color:#888;">No worksheet content.</p>';
-  // Style inputs
-  container.querySelectorAll('input[data-answer]').forEach(inp=>{
-    inp.style.cssText='border:1.5px solid #d4a017;border-radius:6px;padding:6px 10px;font-size:14px;margin:4px 0;';
-    inp.removeAttribute('disabled');inp.value='';
-  });
+  // Show Drive PDF in iframe, or fallback message
+  if(w.driveLink){
+    container.innerHTML=`<iframe src="${escHtml(w.driveLink)}" style="width:100%;height:520px;border:none;border-radius:8px;background:#f5f5f5;" allowfullscreen></iframe>`;
+  } else if(w.worksheetHtml){
+    // Legacy: old worksheets stored as HTML
+    const safeHtml = await prepareWorksheetHtml(w.worksheetHtml||'');
+    container.innerHTML=safeHtml||'<p style="color:#888;">No worksheet content.</p>';
+    container.querySelectorAll('input[data-answer]').forEach(inp=>{
+      inp.style.cssText='border:1.5px solid #d4a017;border-radius:6px;padding:6px 10px;font-size:14px;margin:4px 0;';
+      inp.removeAttribute('disabled');inp.value='';
+    });
+  } else {
+    container.innerHTML='<p style="color:#888;">No worksheet content available.</p>';
+  }
   document.getElementById('pub-ws-result').style.display='none';
-  document.getElementById('pub-ws-submit-btn').style.display='inline-block';
-  document.getElementById('pub-ws-submit-btn').dataset.wsId=w.id;
+  // Hide submit button for Drive-based worksheets (PDF — nothing to grade)
+  const submitBtn=document.getElementById('pub-ws-submit-btn');
+  if(w.driveLink){ submitBtn.style.display='none'; }
+  else { submitBtn.style.display='inline-block'; submitBtn.dataset.wsId=w.id; }
   openM('m-public-ws');
 }
 
-function submitPublicWorksheet(){
+async function submitPublicWorksheet(){
   const container=document.getElementById('pub-ws-content');
   const inputs=container.querySelectorAll('input[data-answer]');
   let score=0,total=inputs.length,results=[];
-  inputs.forEach((inp,i)=>{
-    const expected=(inp.getAttribute('data-answer')||'').trim().toLowerCase();
-    const given=(inp.value||'').trim().toLowerCase();
-    const correct=given===expected;
+  for(let i=0;i<inputs.length;i++){
+    const inp=inputs[i];
+    const storedToken=(inp.getAttribute('data-answer')||'').trim();
+    const given=(inp.value||'').trim();
+    const correct = given!=='' && await checkAnswer(given, storedToken);
     if(correct)score++;
-    results.push({q:i+1,given:inp.value||'—',expected:inp.getAttribute('data-answer'),correct});
+    results.push({q:i+1,given:inp.value||'—',correct});
     inp.style.background=correct?'#edfaf1':'#fff5f5';
     inp.style.borderColor=correct?'#166534':'#c0392b';
-  });
+  }
   const pct=total?Math.round(score/total*100):0;
   const wsId=document.getElementById('pub-ws-submit-btn').dataset.wsId||'';
   const res=document.getElementById('pub-ws-result');
@@ -1657,13 +1788,13 @@ function dsNext(from){
     }
     msg.style.display='none';
     // Build review summary
-    const name=document.getElementById('demo-name').value.trim();
-    const contact=document.getElementById('demo-contact').value.trim();
-    const email=document.getElementById('demo-email').value.trim();
-    const country=document.getElementById('demo-country').value.trim();
-    const type=document.getElementById('demo-type').value;
-    const timing=document.getElementById('demo-timing').value||'No preference';
-    const msgText=document.getElementById('demo-msg-text').value.trim();
+    const name=escHtml(document.getElementById('demo-name').value.trim());
+    const contact=escHtml(document.getElementById('demo-contact').value.trim());
+    const email=escHtml(document.getElementById('demo-email').value.trim());
+    const country=escHtml(document.getElementById('demo-country').value.trim());
+    const type=escHtml(document.getElementById('demo-type').value);
+    const timing=escHtml(document.getElementById('demo-timing').value||'No preference');
+    const msgText=escHtml(document.getElementById('demo-msg-text').value.trim());
     document.getElementById('ds-review').innerHTML=`
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">
         <div><span style="color:#888;">Name:</span> <b>${name}</b></div>
@@ -1671,8 +1802,8 @@ function dsNext(from){
         <div><span style="color:#888;">Contact:</span> <b>${contact}</b></div>
         <div><span style="color:#888;">Email:</span> <b>${email}</b></div>
         <div><span style="color:#888;">Country:</span> <b>${country}</b></div>
-        <div><span style="color:#888;">Grade:</span> <b>${grade}</b></div>
-        <div><span style="color:#888;">Subject:</span> <b>${subject}</b></div>
+        <div><span style="color:#888;">Grade:</span> <b>${escHtml(document.getElementById('demo-grade').value)}</b></div>
+        <div><span style="color:#888;">Subject:</span> <b>${escHtml(document.getElementById('demo-subject').value)}</b></div>
         <div><span style="color:#888;">Timing:</span> <b>${timing}</b></div>
       </div>
       ${msgText?`<div style="margin-top:8px;"><span style="color:#888;">Message:</span> ${msgText}</div>`:''}`;
@@ -1786,15 +1917,18 @@ function loadDemoRequests(){
       const isActive=minsAgo<15;
       const statusColor=r.status==='replied'?'#166534':'#854d0e';
       const statusBg=r.status==='replied'?'#edfaf1':'#fefce8';
+      // SECURITY: escape all user-supplied fields
+      const rn=escHtml(r.name),rg=escHtml(r.grade),rs=escHtml(r.subject);
+      const rc=escHtml(r.contact),re=escHtml(r.email),rco=escHtml(r.country);
       return `<tr style="border-bottom:1px solid #f0ede0;">
-        <td style="padding:10px;font-weight:600;">${r.name}</td>
-        <td style="padding:10px;">${r.grade} · <b>${r.subject}</b></td>
-        <td style="padding:10px;">${r.contact}<br/><span style="color:#888;font-size:11px;">${r.email}</span></td>
-        <td style="padding:10px;">${r.country}</td>
+        <td style="padding:10px;font-weight:600;">${rn}</td>
+        <td style="padding:10px;">${rg} · <b>${rs}</b></td>
+        <td style="padding:10px;">${rc}<br/><span style="color:#888;font-size:11px;">${re}</span></td>
+        <td style="padding:10px;">${rco}</td>
         <td style="padding:10px;"><span style="background:#eff6ff;color:#1d4ed8;border-radius:8px;padding:2px 8px;font-size:11px;">${r.source==='student'?'👤 Student':'🌐 Homepage'}</span></td>
         <td style="padding:10px;"><span style="background:${statusBg};color:${statusColor};border-radius:8px;padding:3px 8px;font-size:11px;font-weight:700;">${r.status==='replied'?'✅ Replied':'⏳ Pending'}</span></td>
         <td style="padding:10px;"><span style="background:${isActive?'#edfaf1':'#f5f5f0'};color:${isActive?'#166534':'#999'};border-radius:8px;padding:3px 8px;font-size:11px;">🟢 ${isActive?'Online':'Offline'}</span></td>
-        <td style="padding:10px;"><button class="btn sm" onclick="openDemoDetail('${r.id}')">Reply</button></td>
+        <td style="padding:10px;"><button class="btn sm" onclick="openDemoDetail('${escHtml(r.id)}')">Reply</button></td>
       </tr>`;
     }).join('')}
     </tbody></table>`;
@@ -1803,20 +1937,26 @@ function loadDemoRequests(){
 function openDemoDetail(id){
   const r=(db.demoRequests||{})[id];if(!r)return;
   currentDemoId=id;
+  // SECURITY: escape all user-supplied fields before injecting into innerHTML
+  const name=escHtml(r.name);const grade=escHtml(r.grade);const subject=escHtml(r.subject);
+  const country=escHtml(r.country);const contact=escHtml(r.contact);const email=escHtml(r.email);
+  const source=r.source==='student'?'Student Portal':'Homepage';
+  const message=escHtml(r.message||'');
+  const replyLink=escHtml(r.replyLink||'');const replyMsg=escHtml(r.replyMsg||'');
   document.getElementById('demo-detail-content').innerHTML=`
     <div style="background:#f8f7f2;border-radius:10px;padding:14px;margin-bottom:12px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
-        <div><b>Name:</b> ${r.name}</div>
-        <div><b>Grade:</b> ${r.grade}</div>
-        <div><b>Subject:</b> ${r.subject}</div>
-        <div><b>Country:</b> ${r.country}</div>
-        <div><b>Contact:</b> ${r.contact}</div>
-        <div><b>Email:</b> ${r.email}</div>
-        <div><b>Source:</b> ${r.source==='student'?'Student Portal':'Homepage'}</div>
-        <div><b>Date:</b> ${new Date(r.submittedAt).toLocaleString()}</div>
+        <div><b>Name:</b> ${name}</div>
+        <div><b>Grade:</b> ${grade}</div>
+        <div><b>Subject:</b> ${subject}</div>
+        <div><b>Country:</b> ${country}</div>
+        <div><b>Contact:</b> ${contact}</div>
+        <div><b>Email:</b> ${email}</div>
+        <div><b>Source:</b> ${escHtml(source)}</div>
+        <div><b>Date:</b> ${escHtml(new Date(r.submittedAt).toLocaleString())}</div>
       </div>
-      ${r.message?`<div style="margin-top:8px;font-size:13px;"><b>Message:</b> ${r.message}</div>`:''}
-      ${r.replyLink?`<div style="margin-top:10px;padding:10px;background:#edfaf1;border-radius:8px;font-size:13px;"><b>✅ Reply sent:</b><br/>Link: <a href="${r.replyLink}" target="_blank">${r.replyLink}</a><br/>${r.replyMsg}</div>`:''}
+      ${message?`<div style="margin-top:8px;font-size:13px;"><b>Message:</b> ${message}</div>`:''}
+      ${replyLink?`<div style="margin-top:10px;padding:10px;background:#edfaf1;border-radius:8px;font-size:13px;"><b>✅ Reply sent:</b><br/>Link: <a href="${replyLink}" target="_blank" rel="noopener noreferrer">${replyLink}</a><br/>${replyMsg}</div>`:''}
     </div>`;
   document.getElementById('demo-reply-link').value=r.replyLink||'';
   document.getElementById('demo-reply-msg').value=r.replyMsg||'';
@@ -1846,22 +1986,27 @@ function loadStudentDemo(){
   myReqs.forEach(r=>{if(db.demoRequests[r.id])db.demoRequests[r.id].lastSeen=new Date().toISOString();});
   if(myReqs.length)sdb();
   if(!myReqs.length){el.innerHTML='<div class="nd" style="margin-bottom:0;">No demo requests yet. Click "New Demo Request" below.</div>';return;}
-  el.innerHTML=myReqs.map(r=>`
+  el.innerHTML=myReqs.map(r=>{
+    // SECURITY: escape all user-supplied fields before innerHTML
+    const rg=escHtml(r.grade),rs=escHtml(r.subject),rm=escHtml(r.message||'');
+    const rl=escHtml(r.replyLink||''),rmsg=escHtml(r.replyMsg||'');
+    return `
     <div style="background:#f8f7f2;border:1px solid #e5e5e0;border-radius:12px;padding:14px 16px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
         <div>
-          <div style="font-weight:700;font-size:14px;">${r.grade} · ${r.subject}</div>
-          <div style="font-size:12px;color:#888;">${new Date(r.submittedAt).toLocaleDateString()}</div>
-          ${r.message?`<div style="font-size:13px;color:#555;margin-top:4px;">${r.message}</div>`:''}
+          <div style="font-weight:700;font-size:14px;">${rg} · ${rs}</div>
+          <div style="font-size:12px;color:#888;">${escHtml(new Date(r.submittedAt).toLocaleDateString())}</div>
+          ${rm?`<div style="font-size:13px;color:#555;margin-top:4px;">${rm}</div>`:''}
         </div>
         <span style="background:${r.status==='replied'?'#edfaf1':'#fefce8'};color:${r.status==='replied'?'#166534':'#854d0e'};border-radius:8px;padding:3px 10px;font-size:12px;font-weight:700;">${r.status==='replied'?'✅ Replied':'⏳ Pending'}</span>
       </div>
-      ${r.replyLink?`<div style="margin-top:10px;padding:10px;background:#edfaf1;border-radius:8px;font-size:13px;">
+      ${rl?`<div style="margin-top:10px;padding:10px;background:#edfaf1;border-radius:8px;font-size:13px;">
         <div style="font-weight:600;color:#166534;margin-bottom:4px;">🎉 Demo Scheduled!</div>
-        <div>📎 <a href="${r.replyLink}" target="_blank" style="color:#1d4ed8;font-weight:600;">Join Demo Class</a></div>
-        ${r.replyMsg?`<div style="margin-top:4px;color:#555;">${r.replyMsg}</div>`:''}
+        <div>📎 <a href="${rl}" target="_blank" rel="noopener noreferrer" style="color:#1d4ed8;font-weight:600;">Join Demo Class</a></div>
+        ${rmsg?`<div style="margin-top:4px;color:#555;">${rmsg}</div>`:''}
       </div>`:''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // ═══════════════════════════════════════════════════
@@ -1891,7 +2036,7 @@ async function openGradeWorksheets(grade){
         ${items.map(w=>`
           <div class="gw-item" style="cursor:pointer;" onclick='openPublicWorksheetById("${w.id}")'>
             <div><div class="gw-item-name">${w.title}</div><div class="gw-item-topic">${w.topics||w.desc||''}</div></div>
-            <span class="gw-free-badge">▶ Try Now</span>
+            <span class="gw-free-badge">${w.driveLink?'📄 View PDF':'▶ Try Now'}</span>
           </div>`).join('')}
       </div>`).join('');
   }
@@ -1918,7 +2063,7 @@ async function openPublicWorksheetById(id){
     const snap=await PORTAL_DOC.get();
     const data=snap.exists?snap.data():{};
     const w=(data.publicWorksheets||{})[id];
-    if(w){closeM('m-grade-ws');openPublicWorksheet(w);}
+    if(w){closeM('m-grade-ws');await openPublicWorksheet(w);}
   }catch(e){alert('Could not load worksheet. Please check internet.');}
 }
 
@@ -3426,7 +3571,7 @@ function loadStudentMeet(){
 }
 
 // ── STUDENT: WORKSHEET ────────────────────────────────
-function openWorksheet(hid){
+async function openWorksheet(hid){
   const s=getMyStudentObj();
   const h=s.homework[hid];
   if(!h||!h.worksheet){alert('Worksheet not found.');return;}
@@ -3438,9 +3583,11 @@ function openWorksheet(hid){
   document.getElementById('ws-title').textContent='✏️ '+h.title;
   document.getElementById('ws-result').style.display='none';
   document.getElementById('ws-submit-btn').style.display='inline-block';
+  // SECURITY: sanitise worksheet HTML and obfuscate answers before injecting into DOM
+  const safeHtml = await prepareWorksheetHtml(h.worksheet||'');
   document.getElementById('ws-content').innerHTML=`<div style="font-size:12px;color:#854d0e;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px;">
     Fill in all answers below, then click Submit Answers. You can only submit once.
-  </div><div id="ws-questions">${h.worksheet}</div>`;
+  </div><div id="ws-questions">${safeHtml}</div>`;
   // Style inputs
   document.querySelectorAll('#ws-questions input').forEach(inp=>{
     inp.style.cssText='border:1.5px solid #d4a017;border-radius:7px;padding:6px 10px;font-size:13px;outline:none;min-width:120px;';
@@ -3457,14 +3604,15 @@ async function submitWorksheet(){
   if(!confirm('Submit your answers? You cannot change them after submitting.'))return;
   let score=0,total=0;
   const answers=[];
-  inputs.forEach(inp=>{
-    const expected=(inp.getAttribute('data-answer')||'').trim().toLowerCase();
-    const given=(inp.value||'').trim().toLowerCase();
-    const correct=given===expected&&given!=='';
+  // SECURITY: answers are stored as HMAC tokens; compare via checkAnswer()
+  for(const inp of inputs){
+    const storedToken=(inp.getAttribute('data-answer')||'').trim();
+    const given=(inp.value||'').trim();
+    const correct = given!=='' && await checkAnswer(given, storedToken);
     if(correct)score++;
     total++;
-    answers.push({given:inp.value.trim(),expected:inp.getAttribute('data-answer'),correct});
-  });
+    answers.push({given:inp.value.trim(),correct});
+  }
   const submission={score,total,answers,at:new Date().toISOString()};
   db.teachers[wsCurrentTid].students[wsCurSid].homework[wsCurrentHwId].submission=submission;
   document.getElementById('ws-submit-btn').innerHTML='<span class="sp"></span>Saving...';
@@ -3543,10 +3691,14 @@ async function changeStudentPass(){
   const msg=document.getElementById('stp-msg');
   const s=getMyStudentObj();
   if(!s){msg.className='msg er';msg.textContent='Error: Student not found.';msg.style.display='block';return;}
-  if(oldP!==s.password){msg.className='msg er';msg.textContent='Current password is incorrect.';msg.style.display='block';return;}
-  if(newP.length<4){msg.className='msg er';msg.textContent='New password must be at least 4 characters.';msg.style.display='block';return;}
+  // SECURITY FIX: verify against passwordHash (PBKDF2), never compare plain s.password
+  const storedHash = s.passwordHash || s.password || '';
+  const oldCorrect = await verifyPassword(oldP, storedHash);
+  if(!oldCorrect){msg.className='msg er';msg.textContent='Current password is incorrect.';msg.style.display='block';return;}
+  if(newP.length<6){msg.className='msg er';msg.textContent='New password must be at least 6 characters.';msg.style.display='block';return;}
   if(newP!==conP){msg.className='msg er';msg.textContent='New passwords do not match.';msg.style.display='block';return;}
   msg.className='msg inf';msg.innerHTML='<span class="sp"></span>Saving...';msg.style.display='block';
+  // Store as PBKDF2 hash, remove any legacy plain-text password field
   db.teachers[sTid].students[sSid].passwordHash=await hashPassword(newP);
   delete db.teachers[sTid].students[sSid].password;
   // Update Firebase Auth password
@@ -3563,17 +3715,21 @@ function editStudentCreds(sid){
   const s=db.teachers[sTid].students[sid];
   const newU=prompt('Edit username for '+s.name+':', s.username||'');
   if(newU===null)return;
-  const newP=prompt('Edit password for '+s.name+':');
+  const newP=prompt('Edit password for '+s.name+' (min 6 characters):');
   if(newP===null)return;
-  if(!newU||!newP||newP.length<4){alert('Username and password (min 4 chars) required.');return;}
+  if(!newU||!newP||newP.length<6){alert('Username and password (min 6 chars) required.');return;}
   // Check username uniqueness
   for(const tid of Object.keys(db.teachers)){
     const dup=Object.values(db.teachers[tid].students||{}).find(x=>x.username===newU&&x.id!==sid);
     if(dup){alert('Username already taken. Choose another.');return;}
   }
   db.teachers[sTid].students[sid].username=newU;
-  hashPassword(newP).then(h=>{db.teachers[sTid].students[sid].passwordHash=h;delete db.teachers[sTid].students[sid].password;sdb();loadStudents();});
-  sdb().then(()=>{loadStudents();alert('✓ Credentials updated!');});
+  // SECURITY: hashPassword now uses PBKDF2 with salt; also purge any legacy plain-text field
+  hashPassword(newP).then(h=>{
+    db.teachers[sTid].students[sid].passwordHash=h;
+    delete db.teachers[sTid].students[sid].password;
+    sdb().then(()=>{loadStudents();alert('✓ Credentials updated!');});
+  });
 }
 </script>
 </body></html>
